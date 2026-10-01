@@ -1,4 +1,4 @@
-# Security Requirements
+<img width="468" height="26" alt="image" src="https://github.com/user-attachments/assets/28982f70-fa0a-4037-af28-0250c9996ebf" /><img width="468" height="56" alt="image" src="https://github.com/user-attachments/assets/429554a2-8706-4ae3-9ba9-e2934e536ee4" /><img width="468" height="26" alt="image" src="https://github.com/user-attachments/assets/2f9a0154-70f9-40ba-ad7c-578f76b41589" /># Security Requirements
 
 | Requirement ID | Requirement/User Story Description | Priority | Complexity | Assigned to |
 |---|---|---|---|---|
@@ -6,3 +6,20 @@
 | SR-02 | **Role-based access control with least privilege, enforced server side.** As the platform owner, I need every request authorised on the server against the caller's role, with deny by default, so that a user can perform only the actions their role requires and hiding buttons in the UI or altering client requests cannot bypass permissions. | High | Medium | Toukir |
 | SR-03 | **Login protection: Argon2id hashing, lockout and rate limiting, all attempts logged.** As the platform owner, I need passwords stored only as salted Argon2id hashes, accounts temporarily locked after repeated failed logins, login requests rate limited per account and per IP, and every login attempt logged, so that brute-force and credential-stuffing attacks are slowed, and a database leak does not expose usable passwords. | High | Medium | Toukir |
 | SR-04 | **Tamper-evident, hash-chained audit log for all admin and roll changes.** As an auditor, I need every administrative action and electoral-roll change recorded in an append-only log in which each entry includes a hash of the previous entry, so that any edit, deletion or reordering of past entries is detectable by a verification routine and each change can be traced to a user, time and before/after value. | High | High | Toukir |
+| SR-05 | --- | | --- | --- |
+| SR-06 | --- | | --- | --- |
+| SR-07 | --- | | --- | --- |
+| SR-08 | --- | | --- | --- |
+| SR-09 | --- | | --- | --- |
+| SR-10 | --- | | --- | --- |
+| SR-11 | --- | | --- | --- |
+| SR-12 | --- | | --- | --- |
+| SR-13 | *** 13 Ballot encryption: These protect the ballot itself from the moment it leaves the voter's browser until it is counted: secret, unlinkable, unaltered, and sent over a hardened connection *** As a voter, I want my ballot unreadable to everyone except the official count, so that no system administrator, attacker or other subsystem can see how I voted. Requirement. At submission the system shall encrypt each ballot with a fresh AES-256-GCM key, and wrap that key with the tally's RSA-3072 OAEP public key. The voting service shall hold only the public key, so stored ballots can't be read back by it. No ballot shall ever be written to storage or logs in plaintext. Threat: Information disclosure of vote choices through database access, backups or logs. Ballot secrecy is the platform's core property in every A1.| High| High | Mykhailo |
+| SR-14 | *** Voter and ballot unlinkability As a voter, I want no record anywhere that connects my identity to my ballot, so that my vote stays secret even from AEC staff. ***
+Requirement. Voter identity and ballots shall be stored in separate databases. After the eligibility check, the voter shall receive a random one-time ballot token, and only its SHA-256 hash is stored, with no voter ID. The ballot shall be cast with the token alone, without the login session. Ballots and tokens shall carry no voter ID, timestamp or IP address. Threat. Re-identification of voters by insiders correlating identity, timing and ballot records.| High | High | Mykhailo |
+| SR-15 | *** Ballot integrity chain: As a candidate, I want proof that no stored ballot was changed, removed or added after casting, so that I can trust the countAs a candidate, I want proof that no stored ballot was changed, removed or added after casting, so that I can trust the count *** The system shall compute a SHA-256 digest for each stored ballot and link it into a hash chain keyed with a separate HMAC integrity key. The tally shall verify the whole chain before decrypting anything, exclude any ballot that fails, and record an integrity alert| High | Medium| Mykhailo |
+| SR-16 | *** Transport and browser hardening: *** a server-side CSRF token on every state-changing request, cross-origin requests accepted only from our frontend, and session cookies HttpOnly, Secure and SameSite=Strict. That's all already in your code and tests. TLS moves to assumptions ("deployed behind TLS 1.3"). | High | Medium | Mykhailo |
+| SR-17 | --- | | --- | --- |
+| SR-18 | --- | | --- | --- |
+| SR-19 | --- | | --- | --- |
+| SR-20 | --- | | --- | --- |
