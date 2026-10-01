@@ -1,5 +1,3 @@
-<img width="468" height="26" alt="image" src="https://github.com/user-attachments/assets/28982f70-fa0a-4037-af28-0250c9996ebf" /><img width="468" height="56" alt="image" src="https://github.com/user-attachments/assets/429554a2-8706-4ae3-9ba9-e2934e536ee4" /><img width="468" height="26" alt="image" src="https://github.com/user-attachments/assets/2f9a0154-70f9-40ba-ad7c-578f76b41589" /># Security Requirements
-
 | Requirement ID | Requirement/User Story Description | Priority | Complexity | Assigned to |
 |---|---|---|---|---|
 | SR-01 | **MFA (TOTP) for all AEC staff and delegate accounts.** As an AEC staff member or state Commissioner's delegate, I must enter a time-based one-time password (TOTP, RFC 6238) in addition to my password before a session is issued, so that a phished or stolen password alone cannot give an attacker access to enrolment, candidate or result functions. | High | Medium | Toukir |
