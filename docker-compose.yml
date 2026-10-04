@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: voting_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-voting_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voting_password}
+      POSTGRES_DB: ${POSTGRES_DB:-voting_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voting_user} -d ${POSTGRES_DB:-voting_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: voting_backend
+    restart: always
+    environment:
+      FLASK_APP: run.py
+      FLASK_ENV: ${FLASK_ENV:-development}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-placeholder}
+      POSTGRES_USER: ${POSTGRES_USER:-voting_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voting_password}
+      POSTGRES_DB: ${POSTGRES_DB:-voting_db}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql://${POSTGRES_USER:-voting_user}:${POSTGRES_PASSWORD:-voting_password}@db:5432/${POSTGRES_DB:-voting_db}
+    ports:
+      - "${BACKEND_PORT:-5000}:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: voting_frontend
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
