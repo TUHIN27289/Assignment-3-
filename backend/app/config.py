@@ -14,12 +14,13 @@ class Config:
     POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
     POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
     
-    SQLALCHEMY_DATABASE_URI = os.getenv(
+    DATABASE_URL = os.getenv(
         "DATABASE_URL",
         f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
     )
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 class TestingConfig(Config):
     TESTING = True
     SECRET_KEY = "test-secret-key"
+    DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
+
