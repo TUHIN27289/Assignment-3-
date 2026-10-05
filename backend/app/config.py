@@ -8,6 +8,10 @@ class Config:
     RECEIPT_SECRET_KEY = os.getenv("RECEIPT_SECRET_KEY", SECRET_KEY)
     FLASK_ENV = os.getenv("FLASK_ENV", "development")
     
+    # Diplomatic Mission IP Ranges Configuration (SR-12)
+    # Comma-separated list of CIDR strings (e.g. "192.0.2.0/24,2001:db8::/32")
+    DIPLOMATIC_MISSION_IP_RANGES = os.getenv("DIPLOMATIC_MISSION_IP_RANGES", "")
+
     # PostgreSQL Configuration
     POSTGRES_USER = os.getenv("POSTGRES_USER", "voting_user")
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "voting_password")
@@ -25,4 +29,5 @@ class TestingConfig(Config):
     SECRET_KEY = "test-secret-key"
     RECEIPT_SECRET_KEY = "test-receipt-secret-key"
     DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
+    DIPLOMATIC_MISSION_IP_RANGES = ""
 
