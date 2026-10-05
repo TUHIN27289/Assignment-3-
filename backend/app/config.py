@@ -5,6 +5,7 @@ load_dotenv()
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-placeholder")
+    RECEIPT_SECRET_KEY = os.getenv("RECEIPT_SECRET_KEY", SECRET_KEY)
     FLASK_ENV = os.getenv("FLASK_ENV", "development")
     
     # PostgreSQL Configuration
@@ -22,5 +23,6 @@ class Config:
 class TestingConfig(Config):
     TESTING = True
     SECRET_KEY = "test-secret-key"
+    RECEIPT_SECRET_KEY = "test-receipt-secret-key"
     DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
 

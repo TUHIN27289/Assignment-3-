@@ -12,6 +12,17 @@ CREATE TABLE IF NOT EXISTS voters (
 );
 
 CREATE INDEX IF NOT EXISTS idx_voters_lookup ON voters (voter_identifier, is_eligible, has_voted);
+
+CREATE TABLE IF NOT EXISTS receipts (
+    id SERIAL PRIMARY KEY,
+    tracking_code VARCHAR(64) NOT NULL UNIQUE,
+    voter_identifier VARCHAR(255) NOT NULL,
+    voted_at TIMESTAMP NOT NULL,
+    signature VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_voter_identifier ON receipts (voter_identifier);
 """
 
 CREATE_VOTERS_TABLE_SQLITE = """
@@ -24,6 +35,17 @@ CREATE TABLE IF NOT EXISTS voters (
 );
 
 CREATE INDEX IF NOT EXISTS idx_voters_lookup ON voters (voter_identifier, is_eligible, has_voted);
+
+CREATE TABLE IF NOT EXISTS receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tracking_code VARCHAR(64) NOT NULL UNIQUE,
+    voter_identifier VARCHAR(255) NOT NULL,
+    voted_at TIMESTAMP NOT NULL,
+    signature VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_voter_identifier ON receipts (voter_identifier);
 """
 
 def get_db_connection(database_url=None):
