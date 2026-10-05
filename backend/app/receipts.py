@@ -46,7 +46,7 @@ class ReceiptService:
         return hmac.compare_digest(expected_sig, signature)
 
     @staticmethod
-    def create_receipt(conn, voter_identifier, voted_at=None, secret_key=None):
+    def create_receipt(conn, voter_identifier, voted_at=None, secret_key=None, auto_commit=True):
         """
         Creates, signs, and records a voter receipt in the database.
         Reveals NO voting choices or ballot content.
@@ -76,7 +76,8 @@ class ReceiptService:
             """
             cursor.execute(query, (tracking_code, voter_identifier, voted_at, signature))
 
-        conn.commit()
+        if auto_commit:
+            conn.commit()
 
         # Returns receipt containing NO ballot choice data
         return {

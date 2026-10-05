@@ -58,7 +58,7 @@ class Voter:
         return None
 
     @staticmethod
-    def cast_vote_once(conn, voter_identifier):
+    def cast_vote_once(conn, voter_identifier, auto_commit=True):
         """
         Atomically checks eligibility and records that a voter has voted.
         Uses a single conditional SQL UPDATE statement to prevent race conditions.
@@ -100,7 +100,8 @@ class Voter:
             cursor.execute(update_query, (voter_identifier,))
             rows_updated = cursor.rowcount
 
-        conn.commit()
+        if auto_commit:
+            conn.commit()
 
         if rows_updated > 0:
             voter = Voter.get_by_identifier(conn, voter_identifier)

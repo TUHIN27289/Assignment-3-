@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request, current_app
 from app.db import get_db_connection
 from app.models import Voter
+from app.receipts import ReceiptService
 
 main_bp = Blueprint("main", __name__)
 
@@ -15,8 +16,9 @@ def health_check():
 @main_bp.route("/api/v1/votes/cast", methods=["POST"])
 def cast_vote():
     """
-    API endpoint for atomic one-vote enforcement (SR-09).
-    Delegates atomic eligibility check and state transition to Voter.cast_vote_once.
+    API endpoint for atomic one-vote enforcement and receipt generation (SR-09 + SR-10).
+    Delegates atomic eligibility check and state transition to Voter.cast_vote_once,
+    and issues a signed voter receipt in the same database transaction.
     """
     if not request.is_json:
         return jsonify({
@@ -37,31 +39,70 @@ def cast_vote():
 
     voter_identifier = voter_identifier.strip()
     database_url = current_app.config.get("DATABASE_URL")
+    secret_key = current_app.config.get("RECEIPT_SECRET_KEY") or current_app.config.get("SECRET_KEY")
     conn = get_db_connection(database_url)
 
     try:
-        result = Voter.cast_vote_once(conn, voter_identifier)
+        # 1. Perform atomic voter update without committing immediately
+        cast_result = Voter.cast_vote_once(conn, voter_identifier, auto_commit=False)
+
+        if not cast_result.get("success"):
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            status_code_map = {
+                "ALREADY_VOTED": 409,
+                "INELIGIBLE": 403,
+                "NOT_FOUND": 404,
+                "INVALID_IDENTIFIER": 400
+            }
+            http_status = status_code_map.get(cast_result.get("status"), 400)
+            return jsonify({
+                "success": False,
+                "status": cast_result.get("status", "FAILED"),
+                "message": cast_result.get("message", "Request processing failed.")
+            }), http_status
+
+        # 2. Extract authoritative voted_at from the successful atomic UPDATE
+        voted_at = cast_result["voter"]["voted_at"]
+
+        # 3. Create signed receipt within the same transaction
+        receipt = ReceiptService.create_receipt(
+            conn,
+            voter_identifier=voter_identifier,
+            voted_at=voted_at,
+            secret_key=secret_key,
+            auto_commit=False
+        )
+
+        # 4. Commit BOTH voter update and receipt creation in one logical transaction
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "status": "SUCCESS",
+            "message": "Vote recorded successfully.",
+            "receipt": {
+                "tracking_code": receipt["tracking_code"],
+                "voter_identifier": receipt["voter_identifier"],
+                "voted_at": receipt["voted_at"],
+                "signature": receipt["signature"]
+            }
+        }), 200
+
     except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return jsonify({
             "success": False,
             "status": "SERVER_ERROR",
             "message": "An internal server error occurred."
         }), 500
     finally:
-        conn.close()
-
-    status_code_map = {
-        "SUCCESS": 200,
-        "ALREADY_VOTED": 409,
-        "INELIGIBLE": 403,
-        "NOT_FOUND": 404,
-        "INVALID_IDENTIFIER": 400
-    }
-
-    http_status = status_code_map.get(result.get("status"), 400)
-
-    return jsonify({
-        "success": result.get("success", False),
-        "status": result.get("status", "FAILED"),
-        "message": result.get("message", "Request processing failed.")
-    }), http_status
+        try:
+            conn.close()
+        except Exception:
+            pass

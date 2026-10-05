@@ -22,8 +22,11 @@ def app():
 
     yield app
 
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    try:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+    except OSError:
+        pass
 
 @pytest.fixture
 def client(app):
