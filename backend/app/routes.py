@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, current_app
 from app.db import get_db_connection
 from app.models import Voter
 from app.receipts import ReceiptService
+from app.validators import BallotValidator
 
 main_bp = Blueprint("main", __name__)
 
@@ -16,9 +17,8 @@ def health_check():
 @main_bp.route("/api/v1/votes/cast", methods=["POST"])
 def cast_vote():
     """
-    API endpoint for atomic one-vote enforcement and receipt generation (SR-09 + SR-10).
-    Delegates atomic eligibility check and state transition to Voter.cast_vote_once,
-    and issues a signed voter receipt in the same database transaction.
+    API endpoint for atomic one-vote enforcement, ballot validation, and receipt generation (SR-09, SR-10, SR-11).
+    Validates ballot structure and preference ordering before any database state or receipt is persisted.
     """
     if not request.is_json:
         return jsonify({
@@ -38,12 +38,29 @@ def cast_vote():
         }), 400
 
     voter_identifier = voter_identifier.strip()
+
+    # If preferences or ballot details are provided, run server-side ballot validation (SR-11)
+    if "preferences" in data or "ballot" in data:
+        # Provide fallback election_id if not explicitly provided in ballot payload
+        ballot_data = dict(data)
+        if "election_id" not in ballot_data or not ballot_data["election_id"]:
+            ballot_data["election_id"] = "DEFAULT-ELECTION"
+
+        val_result = BallotValidator.validate_ballot_structure(ballot_data)
+        if not val_result["is_valid"]:
+            return jsonify({
+                "success": False,
+                "status": "INVALID_BALLOT",
+                "message": "Ballot validation failed.",
+                "errors": val_result["errors"]
+            }), 400
+
     database_url = current_app.config.get("DATABASE_URL")
     secret_key = current_app.config.get("RECEIPT_SECRET_KEY") or current_app.config.get("SECRET_KEY")
     conn = get_db_connection(database_url)
 
     try:
-        # 1. Perform atomic voter update without committing immediately
+        # 1. Perform atomic voter update without committing immediately (SR-09)
         cast_result = Voter.cast_vote_once(conn, voter_identifier, auto_commit=False)
 
         if not cast_result.get("success"):
@@ -67,7 +84,7 @@ def cast_vote():
         # 2. Extract authoritative voted_at from the successful atomic UPDATE
         voted_at = cast_result["voter"]["voted_at"]
 
-        # 3. Create signed receipt within the same transaction
+        # 3. Create signed receipt within the same transaction (SR-10)
         receipt = ReceiptService.create_receipt(
             conn,
             voter_identifier=voter_identifier,
