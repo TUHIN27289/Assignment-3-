@@ -22,6 +22,9 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     # voter | enrolment_officer | delegate | tally_officer | auditor
     role = db.Column(db.String(32), nullable=False)
+    # SR-03 lockout
+    failed_logins = db.Column(db.Integer, nullable=False, default=0)
+    locked_until = db.Column(db.DateTime)
 
 
 class Voter(db.Model):

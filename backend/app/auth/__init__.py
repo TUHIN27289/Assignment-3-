@@ -3,27 +3,68 @@
 SR-02: permission_required() checks the logged-in user's role against the
 permission table in security/rbac.py. The role is read from the database on
 every request, never trusted from the client or cached in the session.
-SR-01 (MFA), SR-03 (lockout/rate limiting) and SR-06 (session management)
-extend this.
+SR-03: login protection
+  - Argon2id password hashing with explicit parameters, rehash on login if
+    the parameters are ever raised
+  - account locked for 15 minutes after 5 wrong passwords
+  - 10 login attempts per minute per IP (Flask-Limiter)
+  - unknown emails still run a full Argon2 check, so response time doesn't
+    reveal which emails have accounts
+  - the same 401 for unknown user, wrong password and locked account
+  - every attempt goes to the audit log (SR-04)
+SR-01 (MFA) and SR-06 (session management) extend this.
 """
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerificationError
+from argon2.exceptions import InvalidHashError, VerificationError
 from flask import Blueprint, abort, g, jsonify, request, session
 
 from .. import audit
-from ..extensions import db
+from ..extensions import db, limiter
 from ..models import User
 from ..security.http import get_csrf_token
 from ..security.rbac import has_permission, public
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
-ph = PasswordHasher()
+# Argon2id, parameters as recommended by RFC 9106 (low-memory option)
+ph = PasswordHasher(time_cost=3, memory_cost=64 * 1024, parallelism=4)
+_DUMMY_HASH = ph.hash("timing-equaliser-not-a-real-password")
+
+MAX_FAILED_LOGINS = 5
+LOCKOUT = timedelta(minutes=15)
+MIN_PASSWORD_LENGTH = 12
+COMMON_PASSWORDS = {"password1234", "123456789012", "qwertyuiop12", "letmein12345", "australia123"}
 
 
 def hash_password(password):
     return ph.hash(password)
+
+
+def check_password_policy(password, email=""):
+    """Returns a list of problems, empty if the password is acceptable.
+    Use wherever an account is created or a password changed."""
+    problems = []
+    if len(password) < MIN_PASSWORD_LENGTH:
+        problems.append(f"must be at least {MIN_PASSWORD_LENGTH} characters")
+    if password.lower() in COMMON_PASSWORDS:
+        problems.append("is too common")
+    local = email.split("@")[0].lower()
+    if local and len(local) >= 4 and local in password.lower():
+        problems.append("must not contain your email name")
+    return problems
+
+
+def _verify(stored_hash, password):
+    try:
+        return ph.verify(stored_hash, password)
+    except (VerificationError, InvalidHashError):
+        return False
+
+
+def _now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def current_user():
@@ -57,16 +98,39 @@ def permission_required(permission):
 
 @bp.post("/login")
 @public
+@limiter.limit("10 per minute")
 def login():
     data = request.get_json(silent=True) or {}
-    user = User.query.filter_by(email=str(data.get("email", "")).lower()).first()
-    try:
-        ok = user is not None and ph.verify(user.password_hash, str(data.get("password", "")))
-    except VerificationError:
-        ok = False
-    if not ok:
-        audit.record("login_failed", None, email=data.get("email"))
+    email = str(data.get("email", "")).lower()
+    password = str(data.get("password", ""))
+    user = User.query.filter_by(email=email).first()
+
+    if user is None:
+        _verify(_DUMMY_HASH, password)  # same amount of work as a real check
+        audit.record("login_failed", None, email=email, reason="unknown user")
         abort(401)
+
+    if user.locked_until and user.locked_until > _now():
+        audit.record("login_failed", user.id, reason="account locked")
+        abort(401)
+
+    if not _verify(user.password_hash, password):
+        user.failed_logins += 1
+        reason = "wrong password"
+        if user.failed_logins >= MAX_FAILED_LOGINS:
+            user.locked_until = _now() + LOCKOUT
+            user.failed_logins = 0
+            reason = "wrong password, account locked"
+        db.session.commit()
+        audit.record("login_failed", user.id, reason=reason)
+        abort(401)
+
+    user.failed_logins = 0
+    user.locked_until = None
+    if ph.check_needs_rehash(user.password_hash):
+        user.password_hash = ph.hash(password)
+    db.session.commit()
+
     session.clear()  # new session on login, stops session fixation
     session["uid"] = user.id
     session.permanent = True
