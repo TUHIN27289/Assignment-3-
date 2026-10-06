@@ -47,10 +47,35 @@ def csrf(client):
 
 
 def login(client, email, password):
+    """Full login. For staff accounts this also does the MFA step (SR-01)."""
     r = client.post("/api/auth/login", json={"email": email, "password": password},
                     headers={"X-CSRF-Token": csrf(client)})
     assert r.status_code == 200, r.get_json()
-    return r.get_json()["csrf_token"]
+    data = r.get_json()
+    if data.get("mfa_setup_required"):
+        secret = client.post("/api/auth/mfa/setup", headers={"X-CSRF-Token": data["csrf_token"]}).get_json()["secret"]
+        data = mfa_verify(client, data["csrf_token"], totp_code(secret, client, email))
+    elif data.get("mfa_required"):
+        data = mfa_verify(client, data["csrf_token"], totp_code(None, client, email))
+    return data["csrf_token"]
+
+
+def totp_code(secret, client, email):
+    """Code for the next unused 30 s step, so repeat logins in a test aren't replays."""
+    import time
+    import pyotp
+    from app.auth.mfa import decrypt_secret
+    with client.application.app_context():
+        u = User.query.filter_by(email=email).one()
+        secret = secret or decrypt_secret(u.id, u.mfa_secret_enc)
+        step = max(int(time.time() // 30), (u.mfa_last_step or 0) + 1)
+    return pyotp.TOTP(secret).at(step * 30)
+
+
+def mfa_verify(client, token, code):
+    r = client.post("/api/auth/mfa/verify", json={"code": code}, headers={"X-CSRF-Token": token})
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()
 
 
 def candidate_ids(app):

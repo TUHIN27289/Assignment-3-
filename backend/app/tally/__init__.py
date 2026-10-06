@@ -10,7 +10,7 @@ from collections import Counter
 from flask import Blueprint, current_app, g, jsonify
 
 from .. import audit
-from ..auth import role_required
+from ..auth import permission_required
 from ..ballot.crypto import (GENESIS_MAC, EncryptedBallot, ballot_digest,
                              chain_mac, decrypt_ballot)
 from ..extensions import db
@@ -75,7 +75,7 @@ def run_tally():
 
 
 @bp.post("/run")
-@role_required("tally_officer")
+@permission_required("tally:run")
 def run():
     result = run_tally()
     audit.record("tally_run", g.user.id, counted=result["counted"],
