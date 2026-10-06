@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/instance/
+*.db
+*.pem
+*.key
+.env
+node_modules/
+dist/
+.DS_Store
+
+# local only, never commit
+backups/
+NOTES.md
+handoff/
