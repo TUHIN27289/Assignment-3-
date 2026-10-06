@@ -6,6 +6,13 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Automatically initialize database schema on application startup
+    try:
+        from app.db import init_db
+        init_db(app.config.get("DATABASE_URL"))
+    except Exception:
+        pass
+
     # Register routes
     from app.routes import main_bp
     app.register_blueprint(main_bp)
