@@ -20,7 +20,7 @@ from flask import current_app, has_request_context, request
 from sqlalchemy.orm import Session
 
 from .extensions import db
-from .models import AuditEvent, AuditHead
+from .models import AuditEvent, AuditHead, User
 
 GENESIS = "0" * 64
 
@@ -44,6 +44,10 @@ def record(event, actor=None, *, coarse_time=False, **details):
     coarse_time=True stores the date only and no IP. Used for voter events,
     where an exact time could be matched against ballot order (SR-14).
     """
+    if actor is not None and not coarse_time:
+        # Fail closed: anything about a voter is coarse, even if the caller forgot to ask.
+        user = db.session.get(User, actor)
+        coarse_time = user is not None and user.role == "voter"
     now = datetime.now(timezone.utc)
     entry = {
         "event": event,

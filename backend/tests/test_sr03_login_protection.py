@@ -100,3 +100,15 @@ def test_old_hash_parameters_are_upgraded_on_login(app, client):
 ])
 def test_password_policy(pw, ok):
     assert (auth.check_password_policy(pw, "jsmith@aec.gov.au") == []) is ok
+
+
+def test_locked_account_still_runs_password_hash(app, client, monkeypatch):
+    """A locked account must do the same hashing work as a wrong password.
+    If it refuses faster, the response time reveals that the account exists."""
+    for _ in range(5):
+        attempt(client, EMAIL, "wrong")
+    calls = []
+    real = auth._verify
+    monkeypatch.setattr(auth, "_verify", lambda h, p: calls.append(h) or real(h, p))
+    attempt(client, EMAIL, GOOD)
+    assert len(calls) == 1

@@ -114,6 +114,7 @@ def login():
         abort(401)
 
     if user.locked_until and user.locked_until > _now():
+        _verify(user.password_hash, password)  # same work as a wrong password, so timing does not reveal the lock
         audit.record("login_failed", user.id, reason="account locked")
         abort(401)
 

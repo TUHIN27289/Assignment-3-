@@ -121,3 +121,15 @@ def test_no_api_to_change_the_log(app, client, auditor):
     c = csrf(client)
     for method in ("post", "put", "delete"):
         assert getattr(client, method)("/api/audit/events", headers={"X-CSRF-Token": c}).status_code == 405
+
+
+def test_failed_and_denied_voter_events_are_date_only_too(app, client):
+    """Every event about a voter is coarse, not only a successful login."""
+    client.post("/api/auth/login", json={"email": "voter1@test.local", "password": "wrong"},
+                headers={"X-CSRF-Token": csrf(client)})
+    c = login(client, "voter1@test.local", "pw-voter")
+    client.post("/api/tally/run", headers={"X-CSRF-Token": c})
+    voter_events = [e for e in events(app) if e.actor_id is not None]
+    assert {e.event for e in voter_events} >= {"login_failed", "login_ok", "access_denied"}
+    for e in voter_events:
+        assert len(e.occurred_at) == 10 and e.source_ip is None, e.event
