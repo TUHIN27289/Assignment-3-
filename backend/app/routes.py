@@ -3,6 +3,7 @@ from app.db import get_db_connection
 from app.models import Voter
 from app.receipts import ReceiptService
 from app.validators import BallotValidator
+from app.ip_validator import DiplomaticIPValidator
 
 main_bp = Blueprint("main", __name__)
 
@@ -17,9 +18,19 @@ def health_check():
 @main_bp.route("/api/v1/votes/cast", methods=["POST"])
 def cast_vote():
     """
-    API endpoint for atomic one-vote enforcement, ballot validation, and receipt generation (SR-09, SR-10, SR-11).
-    Validates ballot structure and preference ordering before any database state or receipt is persisted.
+    API endpoint for atomic one-vote enforcement, ballot validation, receipt generation, and diplomatic IP restriction (SR-09, SR-10, SR-11, SR-12).
+    Validates diplomatic mission IP range, ballot structure, and preference ordering before any database state or receipt is persisted.
     """
+    # Enforce SR-12 Diplomatic Mission IP Authorization before DB operations or payload processing
+    client_ip = DiplomaticIPValidator.extract_client_ip(request)
+    allowed_ip_ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES")
+
+    if not DiplomaticIPValidator.is_ip_allowed(client_ip, allowed_ip_ranges):
+        return jsonify({
+            "success": False,
+            "status": "IP_NOT_ALLOWED",
+            "message": "Voting access is restricted to authorized diplomatic mission networks."
+        }), 403
     if not request.is_json:
         return jsonify({
             "success": False,

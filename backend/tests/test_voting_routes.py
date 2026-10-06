@@ -334,3 +334,202 @@ def test_cast_vote_invalid_starting_rank_rejected(client, app):
     voter = Voter.get_by_identifier(conn, "VOTER-START-RANK")
     conn.close()
     assert voter["has_voted"] is False
+
+
+# --- SR-12 Diplomatic Mission IP Restriction API Tests ---
+
+def test_cast_vote_authorized_ipv4_address(client, app):
+    """SR-12 (1): Authorized IPv4 client IP proceeds normally through SR-11 validation, SR-09 voting, and SR-10 receipt issuance."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-AUTH-1", is_eligible=True, has_voted=False)
+    conn.close()
+
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={
+            "voter_identifier": "VOTER-IP-AUTH-1",
+            "preferences": [{"candidate_id": "CAND-1", "rank": 1}]
+        },
+        environ_base={"REMOTE_ADDR": "192.0.2.10"}
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["status"] == "SUCCESS"
+    assert "receipt" in data
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    voter = Voter.get_by_identifier(conn, "VOTER-IP-AUTH-1")
+    db_receipt = ReceiptService.get_by_tracking_code(conn, data["receipt"]["tracking_code"])
+    conn.close()
+
+    assert voter["has_voted"] is True
+    assert db_receipt is not None
+
+
+def test_cast_vote_unauthorized_ipv4_address(client, app):
+    """SR-12 (2): Unauthorized IPv4 client IP returns HTTP 403 IP_NOT_ALLOWED with zero side-effects."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-UNAUTH-1", is_eligible=True, has_voted=False)
+    conn.close()
+
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-UNAUTH-1"},
+        environ_base={"REMOTE_ADDR": "203.0.113.5"}
+    )
+    assert response.status_code == 403
+    data = response.get_json()
+    assert data["success"] is False
+    assert data["status"] == "IP_NOT_ALLOWED"
+    assert data["message"] == "Voting access is restricted to authorized diplomatic mission networks."
+    assert "receipt" not in data
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    voter = Voter.get_by_identifier(conn, "VOTER-IP-UNAUTH-1")
+    cursor = conn.cursor()
+    cursor.execute("SELECT count(*) FROM receipts WHERE voter_identifier = ?", ("VOTER-IP-UNAUTH-1",))
+    receipt_count = cursor.fetchone()[0]
+    conn.close()
+
+    assert voter["has_voted"] is False
+    assert voter["voted_at"] is None
+    assert receipt_count == 0
+
+
+def test_cast_vote_boundary_ip_inside_allowed_cidr(client, app):
+    """SR-12 (3): Network boundary IP inside allowed CIDR is authorized."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-BOUND-IN", is_eligible=True, has_voted=False)
+    conn.close()
+
+    # Boundary address 192.0.2.255 inside 192.0.2.0/24
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-BOUND-IN"},
+        environ_base={"REMOTE_ADDR": "192.0.2.255"}
+    )
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "SUCCESS"
+
+
+def test_cast_vote_ip_immediately_outside_allowed_cidr(client, app):
+    """SR-12 (4): IP immediately adjacent to allowed CIDR range is rejected with HTTP 403."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-BOUND-OUT", is_eligible=True, has_voted=False)
+    conn.close()
+
+    # Immediate boundary 192.0.3.0 outside 192.0.2.0/24
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-BOUND-OUT"},
+        environ_base={"REMOTE_ADDR": "192.0.3.0"}
+    )
+    assert response.status_code == 403
+    assert response.get_json()["status"] == "IP_NOT_ALLOWED"
+
+
+def test_cast_vote_multiple_configured_cidr_ranges(client, app):
+    """SR-12 (5): Multiple configured CIDR ranges permit authorized requests across any matching subnet."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24, 198.51.100.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-MULTI-1", is_eligible=True, has_voted=False)
+    Voter.create(conn, "VOTER-IP-MULTI-2", is_eligible=True, has_voted=False)
+    conn.close()
+
+    resp1 = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-MULTI-1"},
+        environ_base={"REMOTE_ADDR": "192.0.2.5"}
+    )
+    assert resp1.status_code == 200
+
+    resp2 = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-MULTI-2"},
+        environ_base={"REMOTE_ADDR": "198.51.100.50"}
+    )
+    assert resp2.status_code == 200
+
+
+def test_cast_vote_ipv6_behavior(client, app):
+    """SR-12 (6): IPv6 client IP inside allowed IPv6 CIDR proceeds normally."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "2001:db8::/32"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-IPV6-AUTH", is_eligible=True, has_voted=False)
+    conn.close()
+
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-IPV6-AUTH"},
+        environ_base={"REMOTE_ADDR": "2001:db8::1234"}
+    )
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "SUCCESS"
+
+
+def test_cast_vote_missing_empty_ip_range_configuration_denies_by_default(client, app):
+    """SR-12 (7): Missing/empty IP range configuration denies access by default (HTTP 403)."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = ""
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-EMPTY-CFG", is_eligible=True, has_voted=False)
+    conn.close()
+
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-EMPTY-CFG"},
+        environ_base={"REMOTE_ADDR": "127.0.0.1"}
+    )
+    assert response.status_code == 403
+    assert response.get_json()["status"] == "IP_NOT_ALLOWED"
+
+
+def test_cast_vote_spoofed_x_forwarded_for_header_rejected(client, app):
+    """SR-12 (8): Request with unauthorized remote_addr and spoofed authorized X-Forwarded-For header is rejected with HTTP 403."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-SPOOF-XFF", is_eligible=True, has_voted=False)
+    conn.close()
+
+    # REMOTE_ADDR is unauthorized (203.0.113.10), but X-Forwarded-For attempts to spoof an authorized IP (192.0.2.10)
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-SPOOF-XFF"},
+        headers={"X-Forwarded-For": "192.0.2.10"},
+        environ_base={"REMOTE_ADDR": "203.0.113.10"}
+    )
+    assert response.status_code == 403
+    data = response.get_json()
+    assert data["status"] == "IP_NOT_ALLOWED"
+
+
+def test_cast_vote_spoofed_x_real_ip_header_rejected(client, app):
+    """SR-12 (9): Request with unauthorized remote_addr and spoofed authorized X-Real-IP header is rejected with HTTP 403."""
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    conn = get_db_connection(app.config["DATABASE_URL"])
+    Voter.create(conn, "VOTER-IP-SPOOF-REALIP", is_eligible=True, has_voted=False)
+    conn.close()
+
+    # REMOTE_ADDR is unauthorized (203.0.113.10), but X-Real-IP attempts to spoof an authorized IP (192.0.2.10)
+    response = client.post(
+        "/api/v1/votes/cast",
+        json={"voter_identifier": "VOTER-IP-SPOOF-REALIP"},
+        headers={"X-Real-IP": "192.0.2.10"},
+        environ_base={"REMOTE_ADDR": "203.0.113.10"}
+    )
+    assert response.status_code == 403
+    data = response.get_json()
+    assert data["status"] == "IP_NOT_ALLOWED"

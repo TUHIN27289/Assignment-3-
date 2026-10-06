@@ -29,5 +29,5 @@ class TestingConfig(Config):
     SECRET_KEY = "test-secret-key"
     RECEIPT_SECRET_KEY = "test-receipt-secret-key"
     DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
-    DIPLOMATIC_MISSION_IP_RANGES = ""
+    DIPLOMATIC_MISSION_IP_RANGES = os.getenv("DIPLOMATIC_MISSION_IP_RANGES", "127.0.0.1/32, 192.0.2.0/24, 198.51.100.0/24, 2001:db8::/32")
 
