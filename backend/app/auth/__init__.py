@@ -12,8 +12,10 @@ SR-03: login protection
     reveal which emails have accounts
   - the same 401 for unknown user, wrong password and locked account
   - every attempt goes to the audit log (SR-04)
-SR-01 (MFA) and SR-06 (session management) extend this.
+SR-01: staff accounts need a TOTP code after the password (see mfa.py).
+SR-06 (session management) extends this.
 """
+import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -33,6 +35,7 @@ ph = PasswordHasher(time_cost=3, memory_cost=64 * 1024, parallelism=4)
 _DUMMY_HASH = ph.hash("timing-equaliser-not-a-real-password")
 
 MAX_FAILED_LOGINS = 5
+MFA_ROLES = {"enrolment_officer", "delegate", "tally_officer", "auditor"}
 LOCKOUT = timedelta(minutes=15)
 MIN_PASSWORD_LENGTH = 12
 COMMON_PASSWORDS = {"password1234", "123456789012", "qwertyuiop12", "letmein12345", "australia123"}
@@ -115,14 +118,7 @@ def login():
         abort(401)
 
     if not _verify(user.password_hash, password):
-        user.failed_logins += 1
-        reason = "wrong password"
-        if user.failed_logins >= MAX_FAILED_LOGINS:
-            user.locked_until = _now() + LOCKOUT
-            user.failed_logins = 0
-            reason = "wrong password, account locked"
-        db.session.commit()
-        audit.record("login_failed", user.id, reason=reason)
+        register_failed_attempt(user, "wrong password")
         abort(401)
 
     user.failed_logins = 0
@@ -131,11 +127,35 @@ def login():
         user.password_hash = ph.hash(password)
     db.session.commit()
 
+    if user.role in MFA_ROLES:
+        # Password was right, but no access until the second factor is checked.
+        session.clear()
+        session["mfa_uid"] = user.id
+        session["mfa_started"] = int(time.time())
+        audit.record("login_password_ok", user.id)
+        step = "mfa_required" if user.mfa_enabled else "mfa_setup_required"
+        return jsonify({step: True, "csrf_token": get_csrf_token()})
+
+    start_session(user)
+    audit.record("login_ok", user.id, coarse_time=(user.role == "voter"))
+    return jsonify(role=user.role, csrf_token=get_csrf_token())
+
+
+def start_session(user):
     session.clear()  # new session on login, stops session fixation
     session["uid"] = user.id
     session.permanent = True
-    audit.record("login_ok", user.id, coarse_time=(user.role == "voter"))
-    return jsonify(role=user.role, csrf_token=get_csrf_token())
+
+
+def register_failed_attempt(user, reason):
+    """Shared by password and MFA checks, so both count towards the lockout."""
+    user.failed_logins += 1
+    if user.failed_logins >= MAX_FAILED_LOGINS:
+        user.locked_until = _now() + LOCKOUT
+        user.failed_logins = 0
+        reason += ", account locked"
+    db.session.commit()
+    audit.record("login_failed", user.id, reason=reason)
 
 
 @bp.post("/logout")
@@ -149,3 +169,6 @@ def logout():
 @permission_required("self:read")
 def me():
     return jsonify(id=g.user.id, email=g.user.email, role=g.user.role)
+
+
+from . import mfa  # noqa: E402,F401  registers the /api/auth/mfa routes

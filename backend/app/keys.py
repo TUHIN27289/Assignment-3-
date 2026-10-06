@@ -5,6 +5,7 @@ Each purpose gets its own key:
     loads the PUBLIC key. The private key is loaded by the tally only.
   - ballot integrity key (256-bit HMAC key) for the hash chain.
   - audit key (256-bit HMAC key) for the audit log chain (SR-04).
+  - MFA key (256-bit AES key) that encrypts users' TOTP secrets (SR-01).
 
 Keys are generated on first run for development and kept in KEY_DIR, which
 sits outside the repo. In production these would live in an HSM.
@@ -22,6 +23,7 @@ class KeyService:
         self._ensure_ballot_keypair()
         self._ensure_integrity_key()
         self._ensure_secret("audit.key")
+        self._ensure_secret("mfa.key")
 
     def _path(self, name):
         return os.path.join(self.key_dir, name)
@@ -53,6 +55,10 @@ class KeyService:
     def _ensure_secret(self, name):
         if not os.path.exists(self._path(name)):
             self._write_secret(name, os.urandom(32))
+
+    def mfa_key(self):
+        with open(self._path("mfa.key"), "rb") as f:
+            return f.read()
 
     def audit_key(self):
         with open(self._path("audit.key"), "rb") as f:

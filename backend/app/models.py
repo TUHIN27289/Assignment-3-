@@ -25,6 +25,10 @@ class User(db.Model):
     # SR-03 lockout
     failed_logins = db.Column(db.Integer, nullable=False, default=0)
     locked_until = db.Column(db.DateTime)
+    # SR-01 MFA: TOTP secret encrypted with the MFA key, never stored in plain
+    mfa_secret_enc = db.Column(db.LargeBinary)
+    mfa_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    mfa_last_step = db.Column(db.Integer)  # last accepted 30 s step, blocks code replay
 
 
 class Voter(db.Model):
