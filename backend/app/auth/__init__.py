@@ -1,8 +1,10 @@
-"""Authentication (base version).
+"""Authentication and access checks.
 
-Enough to log in and check roles so the other modules can be built.
-SR-01 (MFA), SR-02 (full RBAC), SR-03 (lockout/rate limiting) and SR-06
-(session management) extend this.
+SR-02: permission_required() checks the logged-in user's role against the
+permission table in security/rbac.py. The role is read from the database on
+every request, never trusted from the client or cached in the session.
+SR-01 (MFA), SR-03 (lockout/rate limiting) and SR-06 (session management)
+extend this.
 """
 from functools import wraps
 
@@ -14,6 +16,7 @@ from .. import audit
 from ..extensions import db
 from ..models import User
 from ..security.http import get_csrf_token
+from ..security.rbac import has_permission, public
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 ph = PasswordHasher()
@@ -38,20 +41,22 @@ def login_required(view):
     return wrapper
 
 
-def role_required(*roles):
+def permission_required(permission):
     def decorator(view):
         @wraps(view)
         @login_required
         def wrapper(*args, **kwargs):
-            if g.user.role not in roles:
-                audit.record("access_denied", g.user.id, path=request.path)
+            if not has_permission(g.user.role, permission):
+                audit.record("access_denied", g.user.id, path=request.path, needed=permission)
                 abort(403)
             return view(*args, **kwargs)
+        wrapper._permission = permission
         return wrapper
     return decorator
 
 
 @bp.post("/login")
+@public
 def login():
     data = request.get_json(silent=True) or {}
     user = User.query.filter_by(email=str(data.get("email", "")).lower()).first()
@@ -70,12 +75,13 @@ def login():
 
 
 @bp.post("/logout")
+@public
 def logout():
     session.clear()
     return jsonify(ok=True)
 
 
 @bp.get("/me")
-@login_required
+@permission_required("self:read")
 def me():
     return jsonify(id=g.user.id, email=g.user.email, role=g.user.role)

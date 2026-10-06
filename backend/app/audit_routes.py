@@ -5,7 +5,7 @@ import json
 from flask import Blueprint, g, jsonify
 
 from . import audit
-from .auth import role_required
+from .auth import permission_required
 from .extensions import db
 from .models import AuditEvent, User
 
@@ -13,7 +13,7 @@ bp = Blueprint("audit", __name__, url_prefix="/api/audit")
 
 
 @bp.get("/events")
-@role_required("auditor")
+@permission_required("audit:read")
 def events():
     rows = db.session.query(AuditEvent).order_by(AuditEvent.seq.desc()).limit(200).all()
     ids = {r.actor_id for r in rows if r.actor_id}
@@ -27,7 +27,7 @@ def events():
 
 
 @bp.get("/verify")
-@role_required("auditor")
+@permission_required("audit:read")
 def verify():
     result = audit.verify()
     audit.record("audit_verified", g.user.id, ok=result["ok"], checked=result["checked"])

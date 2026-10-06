@@ -14,6 +14,8 @@ from flask import abort, jsonify, request, session
 from flask_cors import CORS
 from flask_talisman import Talisman
 
+from .rbac import public
+
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_HEADER = "X-CSRF-Token"
 
@@ -65,5 +67,6 @@ def init_http_security(app):
     app.after_request(_no_store)
 
     @app.get("/api/auth/csrf")
+    @public
     def csrf_token():
         return jsonify(csrf_token=get_csrf_token())
