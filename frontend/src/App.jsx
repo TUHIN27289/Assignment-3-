@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getMe, logout } from './api'
+import Audit from './pages/Audit'
 import Login from './pages/Login'
 import Receipt from './pages/Receipt'
 import Tally from './pages/Tally'
@@ -49,7 +50,8 @@ export default function App() {
           <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
         )}
         {user?.role === 'tally_officer' && <Tally onSessionLost={onSessionLost} />}
-        {user && !['voter', 'tally_officer'].includes(user.role) && (
+        {user?.role === 'auditor' && <Audit onSessionLost={onSessionLost} />}
+        {user && !['voter', 'tally_officer', 'auditor'].includes(user.role) && (
           <p>No screens for this role yet.</p>
         )}
       </main>

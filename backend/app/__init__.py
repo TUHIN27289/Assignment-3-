@@ -16,9 +16,11 @@ def create_app(config_class=Config):
     init_http_security(app)
     app.extensions["keys"] = KeyService(app.config["KEY_DIR"])
 
+    from .audit_routes import bp as audit_bp
     from .auth import bp as auth_bp
     from .ballot import bp as ballot_bp
     from .tally import bp as tally_bp
+    app.register_blueprint(audit_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(ballot_bp)
     app.register_blueprint(tally_bp)

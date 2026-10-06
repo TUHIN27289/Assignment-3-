@@ -65,7 +65,7 @@ def login():
     session.clear()  # new session on login, stops session fixation
     session["uid"] = user.id
     session.permanent = True
-    audit.record("login_ok", user.id)
+    audit.record("login_ok", user.id, coarse_time=(user.role == "voter"))
     return jsonify(role=user.role, csrf_token=get_csrf_token())
 
 
