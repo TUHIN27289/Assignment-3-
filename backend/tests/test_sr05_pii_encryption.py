@@ -153,3 +153,25 @@ def test_no_key_in_database(app):
         for table in ("voters", "users"):
             for row in db.session.execute(text(f"SELECT * FROM {table}")):
                 assert not any(isinstance(c, bytes) and key in c for c in row)
+
+
+def test_unknown_encryption_version_is_rejected(app):
+    set_details(app)
+    stored = raw(app, "address")
+    with app.app_context():
+        db.session.execute(text("UPDATE voters SET address = :b WHERE id = 1"), {"b": b"v9" + stored[2:]})
+        db.session.commit()
+        db.session.expire_all()
+        with pytest.raises(ValueError, match="unknown encryption version"):
+            db.session.get(Voter, 1).address
+
+
+def test_missing_value_is_stored_as_null_not_encrypted(app):
+    set_details(app)
+    with app.app_context():
+        v = db.session.get(Voter, 1)
+        v.address = None
+        db.session.commit()
+    assert raw(app, "address") is None
+    with app.app_context():
+        assert db.session.get(Voter, 1).address is None
