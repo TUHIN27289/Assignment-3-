@@ -8,6 +8,7 @@ Nothing in the ballots database stores a voter id, a timestamp or an IP
 address. That is the core of SR-14.
 """
 from .extensions import db
+from .security.pii import EncryptedText
 
 
 # ---------- identity database ----------
@@ -25,7 +26,10 @@ class Voter(db.Model):
     __tablename__ = "voters"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
-    full_name = db.Column(db.String(255), nullable=False)
+    # SR-05: personal details encrypted at rest
+    full_name = db.Column(EncryptedText("voters.full_name"), nullable=False)
+    date_of_birth = db.Column(EncryptedText("voters.date_of_birth"))
+    address = db.Column(EncryptedText("voters.address"))
     division = db.Column(db.String(64), nullable=False)
     enrolled = db.Column(db.Boolean, nullable=False, default=False)
     # Only a flag, no time. A "voted at" timestamp could be lined up with the

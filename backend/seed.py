@@ -18,7 +18,8 @@ with app.app_context():
         u = User(email=f"voter{n}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role="voter")
         db.session.add(u)
         db.session.flush()
-        db.session.add(Voter(user_id=u.id, full_name=f"Demo Voter {n}", division="Melbourne", enrolled=True))
+        db.session.add(Voter(user_id=u.id, full_name=f"Demo Voter {n}", date_of_birth=f"19{80 + n}-0{n}-1{n}",
+                             address=f"{n} Swanston St, Melbourne VIC 3000", division="Melbourne", enrolled=True))
     for role in ("enrolment_officer", "delegate", "tally_officer", "auditor"):
         db.session.add(User(email=f"{role}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role=role))
     db.session.commit()
