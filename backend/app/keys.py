@@ -4,6 +4,7 @@ Each purpose gets its own key:
   - ballot encryption key pair (RSA-3072). The ballot service only ever
     loads the PUBLIC key. The private key is loaded by the tally only.
   - ballot integrity key (256-bit HMAC key) for the hash chain.
+  - PII key (256-bit AES key) for voter personal data at rest (SR-05).
 
 Keys are generated on first run for development and kept in KEY_DIR, which
 sits outside the repo. In production these would live in an HSM.
@@ -20,6 +21,8 @@ class KeyService:
         os.makedirs(key_dir, mode=0o700, exist_ok=True)
         self._ensure_ballot_keypair()
         self._ensure_integrity_key()
+        if not os.path.exists(self._path("pii.key")):
+            self._write_secret("pii.key", os.urandom(32))
 
     def _path(self, name):
         return os.path.join(self.key_dir, name)
@@ -47,6 +50,10 @@ class KeyService:
     def _ensure_integrity_key(self):
         if not os.path.exists(self._path("ballot_integrity.key")):
             self._write_secret("ballot_integrity.key", os.urandom(32))
+
+    def pii_key(self):
+        with open(self._path("pii.key"), "rb") as f:
+            return f.read()
 
     def ballot_public_key(self):
         with open(self._path("ballot_public.pem"), "rb") as f:
