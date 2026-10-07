@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getMe, logout } from './api'
+import Enrolment from './pages/Enrolment'
 import Login from './pages/Login'
+import MyEnrolment from './pages/MyEnrolment'
 import Receipt from './pages/Receipt'
 import Tally from './pages/Tally'
 import Vote from './pages/Vote'
@@ -46,10 +48,14 @@ export default function App() {
         {receipt && <Receipt trackingCode={receipt} onFinish={() => setReceipt(null)} />}
         {!user && !receipt && <Login onLogin={() => getMe().then(setUser)} />}
         {user?.role === 'voter' && (
-          <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
+          <>
+            <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
+            <MyEnrolment onSessionLost={onSessionLost} />
+          </>
         )}
         {user?.role === 'tally_officer' && <Tally onSessionLost={onSessionLost} />}
-        {user && !['voter', 'tally_officer'].includes(user.role) && (
+        {user?.role === 'enrolment_officer' && <Enrolment onSessionLost={onSessionLost} />}
+        {user && !['voter', 'tally_officer', 'enrolment_officer'].includes(user.role) && (
           <p>No screens for this role yet.</p>
         )}
       </main>
