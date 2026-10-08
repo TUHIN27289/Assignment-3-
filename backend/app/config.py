@@ -24,6 +24,10 @@ class Config:
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = "Strict"
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=15)
+    # SR-06, enforced server-side in auth/sessions.py
+    SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
+    SESSION_ABSOLUTE_TIMEOUT = timedelta(hours=8)
+    REAUTH_WINDOW = timedelta(minutes=5)
 
     FORCE_HTTPS = True
     RATELIMIT_STORAGE_URI = "memory://"

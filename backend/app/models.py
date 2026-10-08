@@ -22,6 +22,17 @@ class User(db.Model):
     role = db.Column(db.String(32), nullable=False)
 
 
+class UserSession(db.Model):
+    """SR-06: server-side record of a login session."""
+    __tablename__ = "user_sessions"
+    sid_hash = db.Column(db.String(64), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False)
+    last_seen = db.Column(db.DateTime, nullable=False)
+    auth_at = db.Column(db.DateTime, nullable=False)  # last time the password was entered
+    revoked = db.Column(db.Boolean, nullable=False, default=False)
+
+
 class Voter(db.Model):
     __tablename__ = "voters"
     id = db.Column(db.Integer, primary_key=True)
