@@ -18,6 +18,7 @@ from flask import Blueprint, abort, g, jsonify, request
 
 from . import audit
 from .auth import hash_password, role_required
+from .auth.sessions import recent_auth_required
 from .extensions import db
 from .models import User, Voter
 
@@ -70,6 +71,7 @@ def me():
 
 @bp.post("/me/enrol")
 @role_required("voter")
+@recent_auth_required
 def self_enrol():
     v = _my_voter()
     if v.enrolled:
@@ -87,6 +89,7 @@ def self_enrol():
 
 @bp.put("/me/address")
 @role_required("voter")
+@recent_auth_required
 def update_address():
     v = _my_voter()
     v.address = _text(request.get_json(silent=True) or {}, "address", 5, 200)
@@ -109,6 +112,7 @@ def list_voters():
 
 @bp.post("/voters")
 @role_required("enrolment_officer")
+@recent_auth_required
 def register():
     data = request.get_json(silent=True) or {}
     email = _text(data, "email", 6, 254).lower()
