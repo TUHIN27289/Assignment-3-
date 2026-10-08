@@ -11,9 +11,10 @@ from argon2.exceptions import VerificationError
 from flask import Blueprint, abort, g, jsonify, request, session
 
 from .. import audit
-from ..extensions import db
+from ..extensions import db, limiter
 from ..models import User
 from ..security.http import get_csrf_token
+from . import sessions  # noqa: E402  (SR-06)
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 ph = PasswordHasher()
@@ -24,8 +25,7 @@ def hash_password(password):
 
 
 def current_user():
-    uid = session.get("uid")
-    return db.session.get(User, uid) if uid else None
+    return sessions.current_session_user()
 
 
 def login_required(view):
@@ -62,16 +62,41 @@ def login():
     if not ok:
         audit.record("login_failed", None, email=data.get("email"))
         abort(401)
-    session.clear()  # new session on login, stops session fixation
-    session["uid"] = user.id
-    session.permanent = True
+    sessions.start(user)
     audit.record("login_ok", user.id)
     return jsonify(role=user.role, csrf_token=get_csrf_token())
 
 
 @bp.post("/logout")
 def logout():
+    sessions.end()
+    return jsonify(ok=True)
+
+
+@bp.post("/logout-all")
+@login_required
+def logout_all():
+    n = sessions.revoke_all(g.user.id)
     session.clear()
+    audit.record("sessions_revoked_all", g.user.id, sessions=n)
+    return jsonify(ok=True, ended=n)
+
+
+@bp.post("/reauth")
+@login_required
+@limiter.limit("5 per minute")
+def reauth():
+    """SR-06: confirm the password again before a sensitive change."""
+    password = str((request.get_json(silent=True) or {}).get("password", ""))
+    try:
+        ok = ph.verify(g.user.password_hash, password)
+    except VerificationError:
+        ok = False
+    if not ok:
+        audit.record("reauth_failed", g.user.id)
+        abort(401, description="password incorrect")
+    sessions.confirm_password_now()
+    audit.record("reauth_ok", g.user.id)
     return jsonify(ok=True)
 
 
