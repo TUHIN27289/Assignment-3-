@@ -111,3 +111,11 @@ def test_forged_session_id_rejected(app, client):
     with client.session_transaction() as s:
         s["sid"] = "made-up-session-id"
     assert client.get("/api/auth/me").status_code == 401
+
+def test_wrong_password_does_not_unlock_sensitive_change(app, client):
+    c = login(client, "voter1@test.local", "pw-voter")
+    shift(app, auth_at=timedelta(minutes=6))
+    h = {"X-CSRF-Token": c}
+    assert client.post("/api/auth/reauth", json={"password": "wrong"}, headers=h).status_code == 401
+    r = client.put("/api/enrolment/me/address", json={"address": ADDRESS}, headers=h)
+    assert r.status_code == 401 and r.get_json()["message"] == "reauth_required"
