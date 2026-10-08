@@ -7,6 +7,13 @@
 //   header on every request that changes something.
 
 let csrfToken = null
+let reauthHandler = null
+
+// SR-06: the app registers a function that asks the user for their password
+// when the server says a sensitive action needs recent re-authentication.
+export function onReauthNeeded(fn) {
+  reauthHandler = fn
+}
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -20,7 +27,7 @@ async function refreshCsrf() {
   csrfToken = (await r.json()).csrf_token
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+export async function api(path, { method = 'GET', body } = {}, retried = false) {
   const unsafe = method !== 'GET'
   if (unsafe && !csrfToken) await refreshCsrf()
   const headers = {}
@@ -34,6 +41,13 @@ export async function api(path, { method = 'GET', body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const data = await r.json().catch(() => ({}))
+  if (r.status === 401 && data.message === 'reauth_required' && reauthHandler && !retried) {
+    const password = await reauthHandler()
+    if (password) {
+      await api('/api/auth/reauth', { method: 'POST', body: { password } }, true)
+      return api(path, { method, body }, true)
+    }
+  }
   if (!r.ok) throw new ApiError(r.status, data.message || data.error || 'Request failed')
   return data
 }

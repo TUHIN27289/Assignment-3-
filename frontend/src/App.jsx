@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getMe, logout } from './api'
+import { getMe, logout, onReauthNeeded } from './api'
 import Enrolment from './pages/Enrolment'
 import Login from './pages/Login'
 import MyEnrolment from './pages/MyEnrolment'
+import ReauthDialog from './pages/ReauthDialog'
 import Receipt from './pages/Receipt'
 import Tally from './pages/Tally'
 import Vote from './pages/Vote'
@@ -19,8 +20,11 @@ export default function App() {
   const [user, setUser] = useState(undefined) // undefined = still checking
   const [receipt, setReceipt] = useState(null)
 
+  const [reauth, setReauth] = useState(null) // resolver while the password dialog is open
+
   useEffect(() => {
     getMe().then(setUser).catch(() => setUser(null))
+    onReauthNeeded(() => new Promise((resolve) => setReauth(() => resolve)))
   }, [])
 
   async function handleLogout() {
@@ -59,6 +63,7 @@ export default function App() {
           <p>No screens for this role yet.</p>
         )}
       </main>
+      {reauth && <ReauthDialog onDone={(pw) => { reauth(pw); setReauth(null) }} />}
     </>
   )
 }
