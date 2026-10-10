@@ -45,10 +45,39 @@ def test_lock_expires(app, client):
 
 
 def test_success_resets_counter(app, client):
+    """Voters: a correct password resets the counter."""
+    for _ in range(4):
+        attempt(client, "voter1@test.local", "wrong")
+    assert attempt(client, "voter1@test.local", "pw-voter").status_code == 200
+    with app.app_context():
+        assert User.query.filter_by(email="voter1@test.local").one().failed_logins == 0
+
+
+def test_staff_counter_resets_only_after_mfa(app, client):
+    """Staff: a correct password alone must not reset the counter, or a stolen
+    password could be re-entered to reset it between batches of MFA guesses."""
+    from .conftest import login
     for _ in range(4):
         attempt(client, EMAIL, "wrong")
-    assert attempt(client, EMAIL, GOOD).status_code == 200
+    assert attempt(client, EMAIL, GOOD).status_code == 200  # password ok, MFA still pending
+    assert user(app).failed_logins == 4
+    login(app.test_client(), EMAIL, GOOD)                   # full login incl. MFA
     assert user(app).failed_logins == 0
+
+
+def test_mfa_guessing_cannot_dodge_lockout(app):
+    client = app.test_client()
+    from .conftest import csrf as get_csrf
+    def password_step():
+        return client.post("/api/auth/login", json={"email": EMAIL, "password": GOOD},
+                           headers={"X-CSRF-Token": get_csrf(client)})
+    token = password_step().get_json()["csrf_token"]
+    client.post("/api/auth/mfa/setup", headers={"X-CSRF-Token": token})
+    for _ in range(4):
+        client.post("/api/auth/mfa/verify", json={"code": "000000"}, headers={"X-CSRF-Token": token})
+    token = password_step().get_json()["csrf_token"]          # re-enter the password...
+    client.post("/api/auth/mfa/verify", json={"code": "000000"}, headers={"X-CSRF-Token": token})
+    assert user(app).locked_until is not None                  # ...and the 5th wrong code still locks
 
 
 def test_same_response_for_unknown_wrong_and_locked(app, client):
@@ -112,3 +141,10 @@ def test_locked_account_still_runs_password_hash(app, client, monkeypatch):
     monkeypatch.setattr(auth, "_verify", lambda h, p: calls.append(h) or real(h, p))
     attempt(client, EMAIL, GOOD)
     assert len(calls) == 1
+
+
+def test_audit_does_not_store_huge_attacker_input(app, client):
+    from app.models import AuditEvent
+    attempt(client, "x" * 5000, "p")
+    with app.app_context():
+        assert len(AuditEvent.query.order_by(AuditEvent.seq.desc()).first().details) < 400
