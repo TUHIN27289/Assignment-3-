@@ -110,7 +110,7 @@ def login():
 
     if user is None:
         _verify(_DUMMY_HASH, password)  # same amount of work as a real check
-        audit.record("login_failed", None, email=email, reason="unknown user")
+        audit.record("login_failed", None, email=email[:254], reason="unknown user")
         abort(401)
 
     if user.locked_until and user.locked_until > _now():
@@ -122,13 +122,14 @@ def login():
         register_failed_attempt(user, "wrong password")
         abort(401)
 
-    user.failed_logins = 0
-    user.locked_until = None
     if ph.check_needs_rehash(user.password_hash):
         user.password_hash = ph.hash(password)
-    db.session.commit()
 
     if user.role in MFA_ROLES:
+        # Don't reset the failed-attempt counter yet: only a correct MFA code does
+        # that (mfa_verify). Otherwise a stolen password could be re-entered to
+        # reset the counter between batches of MFA guesses.
+        db.session.commit()
         # Password was right, but no access until the second factor is checked.
         session.clear()
         session["mfa_uid"] = user.id
@@ -137,6 +138,9 @@ def login():
         step = "mfa_required" if user.mfa_enabled else "mfa_setup_required"
         return jsonify({step: True, "csrf_token": get_csrf_token()})
 
+    user.failed_logins = 0
+    user.locked_until = None
+    db.session.commit()
     start_session(user)
     audit.record("login_ok", user.id, coarse_time=(user.role == "voter"))
     return jsonify(role=user.role, csrf_token=get_csrf_token())
