@@ -100,3 +100,35 @@ def test_endpoint_for_tally_and_auditor_only(app, client):
     client.post("/api/auth/logout", headers={"X-CSRF-Token": c})
     login(client, "tally@test.local", "pw-tally")
     assert client.get("/api/tally/reconcile").get_json()["ok"] is True
+
+
+def test_token_moved_to_another_division_detected(app):
+    """Totals still match, but a token now belongs to a seat the voter isn't enrolled in."""
+    cast(app, "voter1@test.local")
+    with app.app_context():
+        BallotToken.query.one().division = "Kooyong"
+        db.session.commit()
+        r = reconcile()
+    assert r["voters_issued"] == r["tokens_issued"]
+    assert "Kooyong: 1 ballot tokens but 0 voters issued there" in r["problems"]
+
+
+def test_ballots_compared_with_used_tokens_per_division(app):
+    cast(app, "voter1@test.local", "voter2@test.local")
+    with app.app_context():
+        CastBallot.query.first().division = "Kooyong"
+        db.session.commit()
+        problems = reconcile()["problems"]
+    assert "Kooyong: 1 ballots stored but 0 tokens used there" in problems
+    assert "Melbourne: 1 ballots stored but 2 tokens used there" in problems
+
+
+def test_repeated_checks_do_not_repeat_alerts(app):
+    cast(app, "voter1@test.local")
+    with app.app_context():
+        stuff_ballot()
+        first = reconcile()
+        for _ in range(3):
+            reconcile()
+        alerts = IntegrityAlert.query.filter(IntegrityAlert.reason.like("reconciliation:%")).count()
+    assert alerts == len(first["problems"])

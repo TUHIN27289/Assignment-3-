@@ -4,12 +4,17 @@ Three independent records have to agree:
   identity DB : voters marked "ballot issued"
   ballot DB   : ballot tokens issued / used
   ballot DB   : encrypted ballots stored
-Rules:
-  1. tokens issued       == voters marked as issued   (no forged or lost tokens)
-  2. ballots stored      == tokens used               (no ballots without a token)
-  3. per division: ballots <= voters issued there     (no stuffing into one seat)
+Rules, checked for the whole election and again for every division, so a
+problem in one seat can't hide behind matching totals:
+  1. tokens issued  == voters marked as issued   (no forged or lost tokens,
+                                                  no token for the wrong seat)
+  2. ballots stored == tokens used               (no ballots without a token,
+                                                  no ballots moved between seats)
 A token issued but never used (voter closed the browser) is allowed and
 reported, not an error.
+
+Each distinct problem raises one alert. Running the check again doesn't
+repeat alerts that are already open, so real new problems stand out.
 
 Runs before every tally, on demand from the API, and from the command line
 (`flask --app app reconcile`, exit code 1 on mismatch) so it can be
@@ -38,12 +43,17 @@ def reconcile(record_alerts=True):
     if ballots != used:
         problems.append(f"{ballots} ballots stored but only {used} tokens were used")
 
-    issued_by_div = dict(db.session.query(Voter.division, func.count())
-                         .filter(Voter.ballot_issued.is_(True)).group_by(Voter.division).all())
-    ballots_by_div = dict(db.session.query(CastBallot.division, func.count()).group_by(CastBallot.division).all())
-    for div, n in sorted(ballots_by_div.items()):
-        if n > issued_by_div.get(div, 0):
-            problems.append(f"{div}: {n} ballots but only {issued_by_div.get(div, 0)} voters issued")
+    issued_by_div = _count_by_division(Voter, Voter.ballot_issued.is_(True))
+    tokens_by_div = _count_by_division(BallotToken)
+    used_by_div = _count_by_division(BallotToken, BallotToken.used.is_(True))
+    ballots_by_div = _count_by_division(CastBallot)
+    for div in sorted(set(issued_by_div) | set(tokens_by_div) | set(ballots_by_div)):
+        voters_n, tokens_n = issued_by_div.get(div, 0), tokens_by_div.get(div, 0)
+        used_n, ballots_n = used_by_div.get(div, 0), ballots_by_div.get(div, 0)
+        if tokens_n != voters_n:
+            problems.append(f"{div}: {tokens_n} ballot tokens but {voters_n} voters issued there")
+        if ballots_n != used_n:
+            problems.append(f"{div}: {ballots_n} ballots stored but {used_n} tokens used there")
 
     result = {
         "ok": not problems,
@@ -56,10 +66,17 @@ def reconcile(record_alerts=True):
     }
     if problems and record_alerts:
         for p in problems:
-            db.session.add(IntegrityAlert(seq=None, reason=f"reconciliation: {p}"))
+            reason = f"reconciliation: {p}"[:255]
+            if IntegrityAlert.query.filter_by(reason=reason).first() is None:
+                db.session.add(IntegrityAlert(seq=None, reason=reason))
         db.session.commit()
         audit.record("reconciliation_failed", None, problems=problems)
     return result
+
+
+def _count_by_division(model, *conditions):
+    q = db.session.query(model.division, func.count()).filter(*conditions).group_by(model.division)
+    return dict(q.all())
 
 
 def register_cli(app):
