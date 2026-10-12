@@ -15,7 +15,14 @@ Other rules:
     are allowed after that (a recount happens after voting)
   - approval is a conditional UPDATE on status = 'pending', so the same
     request can't be applied twice even if two approvals arrive together
-  - request, approval and rejection are all audited with before/after values
+  - a candidate can only have one change pending at a time, so two
+    conflicting requests can't both be approved
+  - two candidates in the same division can't share a ballot position;
+    this is checked when a change is requested and again when it's applied
+  - the requester can withdraw their own pending request, but never
+    approve or reject it
+  - request, approval, rejection and withdrawal are all audited with
+    before/after values
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -64,6 +71,27 @@ def _clean_fields(data, required):
     if required - set(fields):
         abort(400, description=f"missing {sorted(required - set(fields))}")
     return {k: v.strip() if isinstance(v, str) else v for k, v in fields.items()}
+
+
+def _position_taken(division, ballot_order, ignore_id=None):
+    q = Candidate.query.filter_by(division=division, ballot_order=ballot_order)
+    if ignore_id is not None:
+        q = q.filter(Candidate.id != ignore_id)
+    return q.first() is not None
+
+
+def _check_position(payload, candidate=None):
+    """Abort if the change would put two candidates on the same ballot position."""
+    division = payload.get("division", candidate.division if candidate else None)
+    order = payload.get("ballot_order", candidate.ballot_order if candidate else None)
+    if {"division", "ballot_order"} & set(payload) and \
+            _position_taken(division, order, candidate.id if candidate else None):
+        abort(409, description=f"{division} already has a candidate at ballot position {order}")
+
+
+def _has_pending(candidate_id):
+    pending = PendingChange.query.filter_by(candidate_id=candidate_id, status="pending")
+    return any(not _expire_if_old(p) for p in pending)
 
 
 def _voting_started():
@@ -115,8 +143,10 @@ def request_change():
             abort(404, description="no such candidate in your state")
     if kind in ("create", "update") and _voting_started():
         abort(409, description="candidate details are frozen once voting has started")
-    if kind == "exclude" and candidate.excluded:
-        abort(409, description="candidate already excluded")
+    if candidate is not None and candidate.excluded:
+        abort(409, description="candidate is excluded and can't be changed")
+    if candidate is not None and _has_pending(candidate.id):
+        abort(409, description="this candidate already has a change waiting for approval")
 
     if kind == "create":
         payload = _clean_fields(data, required={"name", "division", "ballot_order"})
@@ -126,6 +156,8 @@ def request_change():
             abort(400, description="nothing to change")
     else:
         payload = {}
+    if kind in ("create", "update"):
+        _check_position(payload, candidate)
 
     p = PendingChange(kind=kind, candidate_id=candidate.id if candidate else None, state=state,
                       payload=json.dumps(payload), reason=reason.strip(), requested_by=g.user.id,
@@ -167,16 +199,26 @@ def _decide(change_id, approve):
         if _voting_started():
             db.session.rollback()
             abort(409, description="candidate details are frozen once voting has started")
+        if _position_taken(payload["division"], payload["ballot_order"]):
+            db.session.rollback()
+            abort(409, description="that ballot position was taken since the request was made")
         c = Candidate(state=p.state, **payload)
         db.session.add(c)
         db.session.flush()
     else:
         c = db.session.get(Candidate, p.candidate_id)
+        if c.excluded:
+            db.session.rollback()
+            abort(409, description="candidate was excluded since the request was made")
         before = _as_dict(c)
         if p.kind == "update":
             if _voting_started():
                 db.session.rollback()
                 abort(409, description="candidate details are frozen once voting has started")
+            if {"division", "ballot_order"} & set(payload) and _position_taken(
+                    payload.get("division", c.division), payload.get("ballot_order", c.ballot_order), c.id):
+                db.session.rollback()
+                abort(409, description="that ballot position was taken since the request was made")
             for k, v in payload.items():
                 setattr(c, k, v)
         else:
@@ -198,3 +240,25 @@ def approve(change_id):
 @permission_required("candidates:write")
 def reject(change_id):
     return _decide(change_id, False)
+
+
+@bp.post("/changes/<int:change_id>/withdraw")
+@permission_required("candidates:write")
+def withdraw(change_id):
+    """The requester can take back their own request before anyone decides on it."""
+    state = _delegate_state()
+    p = db.session.get(PendingChange, change_id)
+    if p is None or p.state != state:
+        abort(404)
+    if p.requested_by != g.user.id:
+        abort(403, description="only the delegate who made the request can withdraw it")
+    claimed = db.session.execute(
+        update(PendingChange).where(PendingChange.id == p.id, PendingChange.status == "pending")
+        .values(status="withdrawn", decided_by=g.user.id, decided_at=_now())
+    ).rowcount
+    if claimed != 1:
+        db.session.rollback()
+        abort(409, description="request was already decided")
+    db.session.commit()
+    audit.record("candidate_change_withdrawn", g.user.id, change_id=p.id)
+    return jsonify(status="withdrawn")

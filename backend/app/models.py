@@ -70,7 +70,7 @@ class PendingChange(db.Model):
     reason = db.Column(db.String(500), nullable=False)
     requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     requested_at = db.Column(db.DateTime, nullable=False)
-    status = db.Column(db.String(16), nullable=False, default="pending")  # pending|applied|rejected|expired
+    status = db.Column(db.String(16), nullable=False, default="pending")  # pending|applied|rejected|withdrawn|expired
     decided_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     decided_at = db.Column(db.DateTime)
 

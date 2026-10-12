@@ -154,3 +154,85 @@ def test_exclusion_changes_the_count(app, client, delegates):
         result = run_tally()
     melb = result["first_preferences"]["Melbourne"]
     assert "Adams" not in melb and sum(melb.values()) == 2 and result["excluded"] == ["Adams"]
+
+
+def test_only_one_pending_change_per_candidate(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    assert request_exclude(app, c1, t1).status_code == 201
+    c2, t2 = as_delegate(app, 2)
+    r = post(c2, t2, "/api/candidates/changes", {"kind": "update", "candidate_id": first_candidate(app),
+                                                  "fields": {"party": "Other"}, "reason": "Registered name change"})
+    assert r.status_code == 409 and "already has a change" in r.get_json()["message"]
+
+
+def test_expired_request_does_not_block_new_one(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    rid = request_exclude(app, c1, t1).get_json()["id"]
+    with app.app_context():
+        db.session.get(PendingChange, rid).requested_at -= timedelta(hours=25)
+        db.session.commit()
+    assert request_exclude(app, c1, t1).status_code == 201
+
+
+def test_ballot_position_clash_refused(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    r = post(c1, t1, "/api/candidates/changes", {"kind": "create", "reason": "Late nomination accepted",
+             "fields": {"name": "E. Evans", "division": "Melbourne", "ballot_order": 1}})
+    assert r.status_code == 409 and "ballot position 1" in r.get_json()["message"]
+
+
+def test_position_taken_between_request_and_approval(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    body = {"kind": "create", "reason": "Late nomination accepted",
+            "fields": {"name": "E. Evans", "division": "Melbourne", "ballot_order": 5}}
+    first = post(c1, t1, "/api/candidates/changes", body).get_json()["id"]
+    second = post(c1, t1, "/api/candidates/changes", dict(body, fields=dict(body["fields"], name="F. Fox"))).get_json()["id"]
+    c2, t2 = as_delegate(app, 2)
+    assert post(c2, t2, f"/api/candidates/changes/{first}/approve").status_code == 200
+    r = post(c2, t2, f"/api/candidates/changes/{second}/approve")
+    assert r.status_code == 409 and "taken since" in r.get_json()["message"]
+    with app.app_context():
+        assert Candidate.query.filter_by(division="Melbourne", ballot_order=5).count() == 1
+
+
+def test_excluded_candidate_cannot_be_changed(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    rid = request_exclude(app, c1, t1).get_json()["id"]
+    c2, t2 = as_delegate(app, 2)
+    post(c2, t2, f"/api/candidates/changes/{rid}/approve")
+    r = post(c1, t1, "/api/candidates/changes", {"kind": "update", "candidate_id": first_candidate(app),
+                                                  "fields": {"party": "Other"}, "reason": "Registered name change"})
+    assert r.status_code == 409
+
+
+def test_requester_can_withdraw_own_request(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    rid = request_exclude(app, c1, t1).get_json()["id"]
+    assert post(c1, t1, f"/api/candidates/changes/{rid}/withdraw").get_json()["status"] == "withdrawn"
+    c2, t2 = as_delegate(app, 2)
+    assert post(c2, t2, f"/api/candidates/changes/{rid}/approve").status_code == 409
+    with app.app_context():
+        assert db.session.get(Candidate, first_candidate(app)).excluded is False
+
+
+def test_only_requester_can_withdraw(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    rid = request_exclude(app, c1, t1).get_json()["id"]
+    c2, t2 = as_delegate(app, 2)
+    assert post(c2, t2, f"/api/candidates/changes/{rid}/withdraw").status_code == 403
+
+
+def test_dual_control_events_are_audited(app, delegates):
+    import json
+    from app.models import AuditEvent
+    c1, t1 = as_delegate(app, 1)
+    rid = request_exclude(app, c1, t1).get_json()["id"]
+    post(c1, t1, f"/api/candidates/changes/{rid}/approve")  # self-approval attempt
+    c2, t2 = as_delegate(app, 2)
+    post(c2, t2, f"/api/candidates/changes/{rid}/approve")
+    with app.app_context():
+        events = [e.event for e in AuditEvent.query.order_by(AuditEvent.seq)]
+        applied = AuditEvent.query.filter_by(event="candidate_change_applied").one()
+    assert {"candidate_change_requested", "dual_control_violation", "candidate_change_applied"} <= set(events)
+    details = json.loads(applied.details)
+    assert details["before"]["excluded"] is False and details["after"]["excluded"] is True
