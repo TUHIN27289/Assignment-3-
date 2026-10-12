@@ -3,6 +3,7 @@ import { getMe, logout } from './api'
 import Audit from './pages/Audit'
 import Delegate from './pages/Delegate'
 import Login from './pages/Login'
+import ReconciliationCheck from './pages/Reconciliation'
 import Receipt from './pages/Receipt'
 import Tally from './pages/Tally'
 import Vote from './pages/Vote'
@@ -52,6 +53,7 @@ export default function App() {
         )}
         {user?.role === 'tally_officer' && <Tally onSessionLost={onSessionLost} />}
         {user?.role === 'auditor' && <Audit onSessionLost={onSessionLost} />}
+        {user?.role === 'auditor' && <ReconciliationCheck onSessionLost={onSessionLost} />}
         {user?.role === 'delegate' && <Delegate onSessionLost={onSessionLost} />}
         {user && !['voter', 'tally_officer', 'auditor', 'delegate'].includes(user.role) && (
           <p>No screens for this role yet.</p>
