@@ -17,6 +17,9 @@ Other rules:
     request can't be applied twice even if two approvals arrive together
   - a candidate can only have one change pending at a time, so two
     conflicting requests can't both be approved
+  - a candidate can only be placed in a division that already exists
+    (one with enrolled voters or candidates), so a typo can't quietly
+    create a seat nobody votes in
   - two candidates in the same division can't share a ballot position;
     this is checked when a change is requested and again when it's applied
   - the requester can withdraw their own pending request, but never
@@ -33,7 +36,7 @@ from sqlalchemy import update
 from . import audit
 from .auth import permission_required
 from .extensions import db
-from .models import Candidate, CastBallot, PendingChange
+from .models import Candidate, CastBallot, PendingChange, Voter
 
 bp = Blueprint("candidates", __name__, url_prefix="/api/candidates")
 
@@ -71,6 +74,12 @@ def _clean_fields(data, required):
     if required - set(fields):
         abort(400, description=f"missing {sorted(required - set(fields))}")
     return {k: v.strip() if isinstance(v, str) else v for k, v in fields.items()}
+
+
+def _known_divisions():
+    voters = {d for (d,) in db.session.query(Voter.division).distinct()}
+    candidates = {d for (d,) in db.session.query(Candidate.division).distinct()}
+    return sorted(voters | candidates)
 
 
 def _position_taken(division, ballot_order, ignore_id=None):
@@ -112,7 +121,7 @@ def list_candidates():
     state = _delegate_state()
     rows = Candidate.query.filter_by(state=state).order_by(Candidate.division, Candidate.ballot_order)
     pending = PendingChange.query.filter_by(state=state, status="pending").order_by(PendingChange.id)
-    return jsonify(state=state, candidates=[_as_dict(c) for c in rows],
+    return jsonify(state=state, divisions=_known_divisions(), candidates=[_as_dict(c) for c in rows],
                    pending=[_view(p) for p in pending if not _expire_if_old(p)])
 
 
@@ -156,6 +165,8 @@ def request_change():
             abort(400, description="nothing to change")
     else:
         payload = {}
+    if "division" in payload and payload["division"] not in _known_divisions():
+        abort(400, description=f"unknown division {payload['division']}")
     if kind in ("create", "update"):
         _check_position(payload, candidate)
 

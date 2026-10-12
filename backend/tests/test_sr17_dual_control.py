@@ -236,3 +236,15 @@ def test_dual_control_events_are_audited(app, delegates):
     assert {"candidate_change_requested", "dual_control_violation", "candidate_change_applied"} <= set(events)
     details = json.loads(applied.details)
     assert details["before"]["excluded"] is False and details["after"]["excluded"] is True
+
+
+def test_unknown_division_refused(app, delegates):
+    c1, t1 = as_delegate(app, 1)
+    r = post(c1, t1, "/api/candidates/changes", {"kind": "create", "reason": "Late nomination accepted",
+             "fields": {"name": "E. Evans", "division": "Melbourn", "ballot_order": 5}})
+    assert r.status_code == 400 and "unknown division" in r.get_json()["message"]
+
+
+def test_division_list_offered_to_delegates(app, delegates):
+    c1, _ = as_delegate(app, 1)
+    assert c1.get("/api/candidates").get_json()["divisions"] == ["Melbourne"]

@@ -150,8 +150,12 @@ export default function Delegate({ onSessionLost }) {
               <label>Party<input value={form.party} maxLength={255}
                 onChange={(e) => setForm({ ...form, party: e.target.value })} /></label>
               {form.kind === 'create' && (
-                <label>Division<input value={form.division} maxLength={255} required
-                  onChange={(e) => setForm({ ...form, division: e.target.value })} /></label>
+                <label>Division
+                  <select value={form.division} required onChange={(e) => setForm({ ...form, division: e.target.value })}>
+                    <option value="" disabled>Choose a division</option>
+                    {data.divisions.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </label>
               )}
               <label>Ballot position<input type="number" min={1} max={100} value={form.ballot_order}
                 required={form.kind === 'create'}
@@ -159,13 +163,13 @@ export default function Delegate({ onSessionLost }) {
             </>
           )}
           <label>
-            {form.kind === 'exclude' ? 'Court order / reason' : 'Reason for change'}
+            {{ create: 'Nomination reference / reason for adding', update: 'Reason for change', exclude: 'Court order / reason' }[form.kind]}
             <input value={form.reason} minLength={10} maxLength={500} required
               onChange={(e) => setForm({ ...form, reason: e.target.value })} />
           </label>
           <div className="row">
             <button type="button" className="secondary" onClick={() => setForm(null)}>Cancel</button>
-            <button type="submit">Request change</button>
+            <button type="submit">{form.kind === 'create' ? 'Request new candidate' : 'Request change'}</button>
           </div>
         </form>
       )}
