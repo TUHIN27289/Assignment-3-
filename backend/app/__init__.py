@@ -37,6 +37,8 @@ def create_app(config_class=Config):
     app.register_blueprint(tally_bp)
     app.register_blueprint(keys_bp)
     register_cli(app)
+    from .tally.reconcile import register_cli as register_reconcile_cli
+    register_reconcile_cli(app)
 
     @app.errorhandler(HTTPException)
     def json_error(e):
