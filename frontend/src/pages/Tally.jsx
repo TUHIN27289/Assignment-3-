@@ -30,7 +30,18 @@ export default function Tally({ onSessionLost }) {
       {error && <p className="error" role="alert">{error}</p>}
       {result && (
         <>
+          <div className={result.reconciliation.ok ? '' : 'alert'}>
+            <strong>{result.reconciliation.ok ? 'Reconciliation passed.' : 'Reconciliation FAILED. Do not certify these results.'}</strong>
+            <p className="muted">
+              Voters issued {result.reconciliation.voters_issued} · tokens issued {result.reconciliation.tokens_issued}
+              {' '}({result.reconciliation.tokens_unused} unused) · ballots stored {result.reconciliation.ballots_stored}
+            </p>
+            {result.reconciliation.problems.length > 0 && (
+              <ul>{result.reconciliation.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+            )}
+          </div>
           <p><strong>{result.counted}</strong> ballots verified and counted.</p>
+          {result.excluded.length > 0 && <p className="muted">Excluded by court order: {result.excluded.join(', ')}</p>}
           {result.rejected.length > 0 && (
             <div className="alert">
               <strong>{result.rejected.length} integrity problem(s):</strong>

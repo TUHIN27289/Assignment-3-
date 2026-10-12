@@ -3,6 +3,7 @@ import uuid
 
 from app.extensions import db
 from app.models import BallotToken, CastBallot, IntegrityAlert, Voter
+from app.tally import run_tally
 from app.tally.reconcile import reconcile
 
 from .conftest import login, vote
@@ -85,3 +86,17 @@ def test_cli_exit_codes(app):
         stuff_ballot()
     bad = runner.invoke(args=["reconcile"])
     assert bad.exit_code == 1 and "MISMATCH" in bad.output
+
+
+def test_tally_includes_reconciliation(app):
+    cast(app, "voter1@test.local")
+    with app.app_context():
+        assert run_tally()["reconciliation"]["ok"] is True
+
+
+def test_endpoint_for_tally_and_auditor_only(app, client):
+    c = login(client, "voter1@test.local", "pw-voter")
+    assert client.get("/api/tally/reconcile").status_code == 403
+    client.post("/api/auth/logout", headers={"X-CSRF-Token": c})
+    login(client, "tally@test.local", "pw-tally")
+    assert client.get("/api/tally/reconcile").get_json()["ok"] is True

@@ -1,6 +1,7 @@
 """Tally: counts the ballots that pass every integrity check.
 
-verify_chain() is the SR-15 check that runs before anything is counted.
+reconcile() (SR-19) and verify_chain() (SR-15) both run before anything
+is counted.
 Only ballots that pass are decrypted (SR-13, private key used here only).
 Candidates excluded through dual control (SR-17) are skipped, and each
 ballot counts for that voter's next preference instead.
@@ -17,6 +18,7 @@ from ..ballot.crypto import (GENESIS_MAC, EncryptedBallot, ballot_digest,
                              chain_mac, decrypt_ballot)
 from ..extensions import db
 from ..models import Candidate, CastBallot, ChainHead, IntegrityAlert
+from .reconcile import reconcile
 
 bp = Blueprint("tally", __name__, url_prefix="/api/tally")
 
@@ -53,6 +55,7 @@ def verify_chain(integrity_key):
 
 def run_tally():
     keys = current_app.extensions["keys"]
+    reconciliation = reconcile()  # SR-19, before anything is decrypted
     valid, problems = verify_chain(keys.integrity_key())
     for seq, reason in problems:
         db.session.add(IntegrityAlert(seq=seq, reason=reason))
@@ -76,6 +79,7 @@ def run_tally():
         results.setdefault(division, {})[names.get(candidate_id, str(candidate_id))] = n
     return {
         "counted": len(valid),
+        "reconciliation": reconciliation,
         "rejected": [{"seq": s, "reason": r} for s, r in problems],
         "first_preferences": results,
         "excluded": sorted(names.get(i, str(i)) for i in excluded),
@@ -88,4 +92,12 @@ def run():
     result = run_tally()
     audit.record("tally_run", g.user.id, counted=result["counted"],
                  rejected=len(result["rejected"]))
+    return jsonify(result)
+
+
+@bp.get("/reconcile")
+@permission_required("tally:reconcile")
+def reconcile_endpoint():
+    result = reconcile()
+    audit.record("reconciliation_run", g.user.id, ok=result["ok"])
     return jsonify(result)

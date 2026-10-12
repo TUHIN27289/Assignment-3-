@@ -12,8 +12,8 @@ PERMISSIONS = {
     "voter": {"self:read", "ballot:vote"},
     "enrolment_officer": {"self:read", "enrolment:read", "enrolment:write"},
     "delegate": {"self:read", "candidates:read", "candidates:write"},
-    "tally_officer": {"self:read", "tally:run"},
-    "auditor": {"self:read", "audit:read"},
+    "tally_officer": {"self:read", "tally:run", "tally:reconcile"},
+    "auditor": {"self:read", "audit:read", "tally:reconcile"},
 }
 
 
