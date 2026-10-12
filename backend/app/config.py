@@ -17,8 +17,9 @@ class Config:
 
     # Key material is kept outside the source tree (SR-20).
     KEY_DIR = os.environ.get("KEY_DIR", os.path.join(os.getcwd(), "instance", "keys"))
-    # SR-20: set in production so private keys are encrypted on disk
+    # SR-20: encrypts private keys and secrets on disk. Required in production.
     KEY_PASSPHRASE = os.environ.get("KEY_PASSPHRASE")
+    APP_ENV = os.environ.get("APP_ENV", "development")  # development | production
 
     ELECTION_ID = os.environ.get("ELECTION_ID", "federal-2026")
     FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://localhost:5173")
@@ -35,6 +36,7 @@ class Config:
 
 class TestConfig(Config):
     TESTING = True
+    APP_ENV = "test"
     SECRET_KEY = "test-secret"
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_BINDS = {"ballots": "sqlite://", "audit": "sqlite://"}

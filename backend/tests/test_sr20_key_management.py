@@ -177,3 +177,45 @@ def test_encrypt_cli_is_audited(tmp_path):
     assert out.exit_code == 0 and "5 key file(s) encrypted" in out.output
     with app.app_context():
         assert AuditEvent.query.filter_by(event="keys_encrypted_at_rest").count() == 1
+
+
+def _cfg(tmp_path, **settings):
+    return type("Cfg", (TestConfig,), {"KEY_DIR": str(tmp_path / "k"), **settings})
+
+
+def test_production_refuses_to_start_without_passphrase(tmp_path):
+    with pytest.raises(KeyEncryptionError, match="must be set"):
+        create_app(_cfg(tmp_path, APP_ENV="production", KEY_PASSPHRASE=None))
+
+
+def test_production_refuses_short_passphrase(tmp_path):
+    with pytest.raises(KeyEncryptionError, match="at least"):
+        create_app(_cfg(tmp_path, APP_ENV="production", KEY_PASSPHRASE="short"))
+
+
+def test_production_starts_with_passphrase(tmp_path):
+    app = create_app(_cfg(tmp_path, APP_ENV="production", KEY_PASSPHRASE=PASSPHRASE))
+    assert (tmp_path / "k" / "audit.key").read_bytes().startswith(SECRET_MAGIC)
+    assert app.extensions["keys"].audit_key()
+
+
+def test_rotation_is_audited(app):
+    import json
+    from app.models import AuditEvent
+    keys = app.extensions["keys"]
+    old_kid = keys.signing_key("results")[0]
+    out = app.test_cli_runner().invoke(args=["keys", "rotate", "results"])
+    assert out.exit_code == 0
+    with app.app_context():
+        event = AuditEvent.query.filter_by(event="key_rotated").one()
+    details = json.loads(event.details)
+    assert details["purpose"] == "results" and details["old_kid"] == old_kid
+    assert details["new_kid"] == keys.signing_key("results")[0] != old_kid
+    assert details["operator"]
+
+
+def test_rotate_unknown_purpose_is_refused(app):
+    before = set(app.extensions["keys"].public_keys("results"))
+    out = app.test_cli_runner().invoke(args=["keys", "rotate", "ballot"])
+    assert out.exit_code != 0
+    assert set(app.extensions["keys"].public_keys("results")) == before

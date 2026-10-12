@@ -3,7 +3,7 @@ from werkzeug.exceptions import HTTPException
 
 from .config import Config
 from .extensions import db, limiter
-from .keys import KeyService
+from .keys import KeyService, require_passphrase
 from .security.http import init_http_security
 from .security.rbac import init_rbac
 
@@ -16,7 +16,11 @@ def create_app(config_class=Config):
     limiter.init_app(app)
     init_http_security(app)
     init_rbac(app)
-    keys = KeyService(app.config["KEY_DIR"], app.config.get("KEY_PASSPHRASE"))
+    passphrase = app.config.get("KEY_PASSPHRASE")
+    require_passphrase(app.config.get("APP_ENV"), passphrase)  # SR-20: no plaintext keys in production
+    if not passphrase and not app.testing:
+        app.logger.warning("KEY_PASSPHRASE not set: keys are stored unencrypted (development only)")
+    keys = KeyService(app.config["KEY_DIR"], passphrase)
     keys.check_permissions()  # SR-20: refuse to start with exposed keys
     app.extensions["keys"] = keys
 

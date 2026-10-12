@@ -13,7 +13,8 @@ sits outside the repo. In production these would live in an HSM.
 SR-20 rules enforced here:
   - one key per purpose, never reused across purposes
   - no key material in the source tree (a test scans the repo for it)
-  - private keys encrypted at rest when KEY_PASSPHRASE is set
+  - private keys encrypted at rest when KEY_PASSPHRASE is set. The passphrase
+    is required when APP_ENV=production, so keys are never in the clear there
   - the 256-bit secrets (audit, MFA, integrity) are encrypted at rest too,
     with AES-256-GCM under a key derived from the passphrase (scrypt). The
     file name is bound in as associated data, so a secret copied into the
@@ -22,7 +23,8 @@ SR-20 rules enforced here:
     other users (folder 0700, files 0600)
   - signing keys are versioned and can be rotated. Old public keys are kept,
     so anything signed before a rotation can still be verified. Every
-    signature carries a key id (kid) saying which key made it.
+    signature carries a key id (kid) saying which key made it. Every
+    rotation is written to the audit log (SR-04).
 """
 import hashlib
 import os
@@ -37,6 +39,7 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 # Header for an encrypted secret file: magic | salt (16) | nonce (12) | ciphertext
 SECRET_MAGIC = b"EVP-KEY1"
 SCRYPT_N = 2 ** 15
+MIN_PASSPHRASE_LENGTH = 16
 
 
 class KeyPermissionError(RuntimeError):
@@ -45,6 +48,16 @@ class KeyPermissionError(RuntimeError):
 
 class KeyEncryptionError(RuntimeError):
     """A key file is encrypted and can't be read, or isn't encrypted when it should be."""
+
+
+def require_passphrase(app_env, passphrase):
+    """Production must never run with keys stored in the clear."""
+    if app_env != "production":
+        return
+    if not passphrase:
+        raise KeyEncryptionError("KEY_PASSPHRASE must be set when APP_ENV=production")
+    if len(passphrase) < MIN_PASSPHRASE_LENGTH:
+        raise KeyEncryptionError(f"KEY_PASSPHRASE must be at least {MIN_PASSPHRASE_LENGTH} characters")
 
 
 def fingerprint(public_key):
