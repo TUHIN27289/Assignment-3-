@@ -20,6 +20,10 @@ with app.app_context():
         db.session.flush()
         db.session.add(Voter(user_id=u.id, full_name=f"Demo Voter {n}", division="Melbourne", enrolled=True))
     for role in ("enrolment_officer", "delegate", "tally_officer", "auditor"):
-        db.session.add(User(email=f"{role}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role=role))
+        db.session.add(User(email=f"{role}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role=role,
+                            state="VIC" if role == "delegate" else None))
+    # SR-17 needs a second delegate to approve changes
+    db.session.add(User(email="delegate2@demo.local", password_hash=hash_password(DEMO_PASSWORD),
+                        role="delegate", state="VIC"))
     db.session.commit()
     print("seeded demo accounts (see seed.py for the password)")
