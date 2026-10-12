@@ -14,6 +14,10 @@ SR-20 rules enforced here:
   - one key per purpose, never reused across purposes
   - no key material in the source tree (a test scans the repo for it)
   - private keys encrypted at rest when KEY_PASSPHRASE is set
+  - the 256-bit secrets (audit, MFA, integrity) are encrypted at rest too,
+    with AES-256-GCM under a key derived from the passphrase (scrypt). The
+    file name is bound in as associated data, so a secret copied into the
+    wrong file is rejected instead of being used for the wrong purpose
   - the app refuses to start if the key folder or files are readable by
     other users (folder 0700, files 0600)
   - signing keys are versioned and can be rotated. Old public keys are kept,
@@ -24,12 +28,23 @@ import hashlib
 import os
 import stat
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+# Header for an encrypted secret file: magic | salt (16) | nonce (12) | ciphertext
+SECRET_MAGIC = b"EVP-KEY1"
+SCRYPT_N = 2 ** 15
 
 
 class KeyPermissionError(RuntimeError):
     pass
+
+
+class KeyEncryptionError(RuntimeError):
+    """A key file is encrypted and can't be read, or isn't encrypted when it should be."""
 
 
 def fingerprint(public_key):
@@ -44,6 +59,7 @@ class KeyService:
     def __init__(self, key_dir, passphrase=None):
         self.key_dir = key_dir
         self._passphrase = passphrase.encode() if passphrase else None
+        self._secrets = {}  # decrypted secrets, so scrypt runs once per key, not per request
         os.makedirs(key_dir, mode=0o700, exist_ok=True)
         for purpose in self.SIGNING_PURPOSES:
             if not self._versions(purpose):
@@ -73,20 +89,49 @@ class KeyService:
             ))
 
     def _ensure_integrity_key(self):
-        if not os.path.exists(self._path("ballot_integrity.key")):
-            self._write_secret("ballot_integrity.key", os.urandom(32))
+        self._ensure_secret("ballot_integrity.key")
 
     def _ensure_secret(self, name):
         if not os.path.exists(self._path(name)):
-            self._write_secret(name, os.urandom(32))
+            self._write_secret(name, self._wrap_secret(name, os.urandom(32)))
+
+    def _wrap_secret(self, name, secret):
+        """Encrypt a 256-bit secret for storage. Unchanged if no passphrase is set."""
+        if not self._passphrase:
+            return secret
+        salt, nonce = os.urandom(16), os.urandom(12)
+        aead = AESGCM(self._kek(salt))
+        return SECRET_MAGIC + salt + nonce + aead.encrypt(nonce, secret, name.encode())
+
+    def _kek(self, salt):
+        """Key-encryption key derived from the passphrase."""
+        return Scrypt(salt=salt, length=32, n=SCRYPT_N, r=8, p=1).derive(self._passphrase)
+
+    def _read_secret(self, name):
+        if name in self._secrets:
+            return self._secrets[name]
+        with open(self._path(name), "rb") as f:
+            data = f.read()
+        encrypted = data.startswith(SECRET_MAGIC)
+        if encrypted and not self._passphrase:
+            raise KeyEncryptionError(f"{name} is encrypted, set KEY_PASSPHRASE to use it")
+        if not encrypted and self._passphrase:
+            raise KeyEncryptionError(f"{name} is not encrypted, run `flask --app app keys encrypt`")
+        if encrypted:
+            body = data[len(SECRET_MAGIC):]
+            salt, nonce, ciphertext = body[:16], body[16:28], body[28:]
+            try:
+                data = AESGCM(self._kek(salt)).decrypt(nonce, ciphertext, name.encode())
+            except InvalidTag:
+                raise KeyEncryptionError(f"{name}: wrong passphrase, or the file was changed or swapped") from None
+        self._secrets[name] = data
+        return data
 
     def mfa_key(self):
-        with open(self._path("mfa.key"), "rb") as f:
-            return f.read()
+        return self._read_secret("mfa.key")
 
     def audit_key(self):
-        with open(self._path("audit.key"), "rb") as f:
-            return f.read()
+        return self._read_secret("audit.key")
 
     def ballot_public_key(self):
         with open(self._path("ballot_public.pem"), "rb") as f:
@@ -98,8 +143,7 @@ class KeyService:
             return self._load_private(f.read())
 
     def integrity_key(self):
-        with open(self._path("ballot_integrity.key"), "rb") as f:
-            return f.read()
+        return self._read_secret("ballot_integrity.key")
 
     # ---- SR-20 ----
 

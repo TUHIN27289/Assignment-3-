@@ -8,11 +8,13 @@ from cryptography.hazmat.primitives import serialization
 
 from app import create_app
 from app.config import TestConfig
-from app.keys import KeyPermissionError, KeyService, fingerprint
+from app.keys import SECRET_MAGIC, KeyEncryptionError, KeyPermissionError, KeyService, fingerprint
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 ON_WINDOWS = os.name == "nt"
 SKIP_ON_WINDOWS = pytest.mark.skipif(ON_WINDOWS, reason="Windows has no Unix permission bits")
+PASSPHRASE = "correct horse battery staple"
+SECRETS = ("audit.key", "mfa.key", "ballot_integrity.key")
 SKIP_DIRS = {".venv", "node_modules", "instance", ".git", "__pycache__", "dist", "backups", ".pytest_cache"}
 
 
@@ -103,3 +105,43 @@ def test_rotate_cli(app):
     out = runner.invoke(args=["keys", "rotate", "results"])
     assert out.exit_code == 0 and "new results key" in out.output
     assert len(set(app.extensions["keys"].public_keys("results")) - before) == 1
+
+
+def test_secret_keys_encrypted_when_passphrase_set(tmp_path):
+    k = KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
+    loaded = {"audit.key": k.audit_key(), "mfa.key": k.mfa_key(), "ballot_integrity.key": k.integrity_key()}
+    for name in SECRETS:
+        on_disk = (tmp_path / "k" / name).read_bytes()
+        assert on_disk.startswith(SECRET_MAGIC)
+        assert len(loaded[name]) == 32 and loaded[name] not in on_disk
+
+
+def test_secret_keys_stable_across_restarts(tmp_path):
+    first = KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE).audit_key()
+    assert KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE).audit_key() == first
+
+
+def test_encrypted_secret_unreadable_without_passphrase(tmp_path):
+    KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
+    with pytest.raises(KeyEncryptionError, match="set KEY_PASSPHRASE"):
+        KeyService(str(tmp_path / "k")).audit_key()
+
+
+def test_encrypted_secret_wrong_passphrase(tmp_path):
+    KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
+    with pytest.raises(KeyEncryptionError, match="wrong passphrase"):
+        KeyService(str(tmp_path / "k"), passphrase="not the passphrase").mfa_key()
+
+
+def test_secret_copied_into_another_purpose_is_rejected(tmp_path):
+    """Each secret is bound to its file name, so it can't be reused for a different purpose."""
+    KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
+    (tmp_path / "k" / "mfa.key").write_bytes((tmp_path / "k" / "audit.key").read_bytes())
+    with pytest.raises(KeyEncryptionError):
+        KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE).mfa_key()
+
+
+def test_plain_secret_refused_once_passphrase_is_set(tmp_path):
+    KeyService(str(tmp_path / "k"))  # created before a passphrase was configured
+    with pytest.raises(KeyEncryptionError, match="keys encrypt"):
+        KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE).audit_key()
