@@ -139,3 +139,18 @@ def test_only_delegates(app, client):
     c = login(client, "voter1@test.local", "pw-voter")
     assert client.get("/api/candidates").status_code == 403
     assert post(client, c, "/api/candidates/changes", {}).status_code == 403
+
+
+def test_exclusion_changes_the_count(app, client, delegates):
+    ids = [first_candidate(app)] + [i for i in range(1, 5) if i != first_candidate(app)]
+    for e in ["voter1@test.local", "voter2@test.local"]:
+        vote(app, app.test_client(), e, ids)
+    c1, t1 = as_delegate(app, 1)
+    rid = request_exclude(app, c1, t1).get_json()["id"]
+    c2, t2 = as_delegate(app, 2)
+    assert post(c2, t2, f"/api/candidates/changes/{rid}/approve").status_code == 200
+    from app.tally import run_tally
+    with app.app_context():
+        result = run_tally()
+    melb = result["first_preferences"]["Melbourne"]
+    assert "Adams" not in melb and sum(melb.values()) == 2 and result["excluded"] == ["Adams"]

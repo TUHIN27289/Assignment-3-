@@ -1,9 +1,11 @@
-"""Tally (base version, SR-17 to SR-20 owner extends this).
+"""Tally: counts the ballots that pass every integrity check.
 
 verify_chain() is the SR-15 check that runs before anything is counted.
 Only ballots that pass are decrypted (SR-13, private key used here only).
-Counting is first preferences only for now. Full preferential counting
-comes later.
+Candidates excluded through dual control (SR-17) are skipped, and each
+ballot counts for that voter's next preference instead.
+Counting is first preferences only. Full preferential counting (seats
+decided over several rounds) is out of scope for the prototype.
 """
 from collections import Counter
 
@@ -57,11 +59,16 @@ def run_tally():
     db.session.commit()
 
     private_key = keys.ballot_private_key()
+    # SR-17: a candidate excluded by approved court order is skipped, and the
+    # ballot counts for that voter's next preference instead
+    excluded = {c.id for c in Candidate.query.filter_by(excluded=True)}
     first_prefs = Counter()
     for b in valid:
         ballot = decrypt_ballot(EncryptedBallot(b.ciphertext, b.nonce, b.wrapped_key),
                                 private_key, b.ballot_id)
-        first_prefs[(b.division, ballot["house"][0])] += 1
+        choice = next((c for c in ballot["house"] if c not in excluded), None)
+        if choice is not None:
+            first_prefs[(b.division, choice)] += 1
 
     names = {c.id: c.name for c in Candidate.query}
     results = {}
@@ -71,6 +78,7 @@ def run_tally():
         "counted": len(valid),
         "rejected": [{"seq": s, "reason": r} for s, r in problems],
         "first_preferences": results,
+        "excluded": sorted(names.get(i, str(i)) for i in excluded),
     }
 
 
