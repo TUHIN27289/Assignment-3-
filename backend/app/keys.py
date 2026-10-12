@@ -155,6 +155,43 @@ class KeyService:
     def _load_private(self, data):
         return serialization.load_pem_private_key(data, password=self._passphrase)
 
+    def encrypt_at_rest(self):
+        """Encrypt any key files that were created before KEY_PASSPHRASE was set.
+
+        Keys already encrypted are left alone, so this is safe to run twice.
+        Returns the files that were changed.
+        """
+        if not self._passphrase:
+            raise KeyEncryptionError("set KEY_PASSPHRASE first")
+        changed = []
+        private_pems = ["ballot_private.pem"] + [
+            os.path.join("signing", p, f"v{v}.pem") for p in self.SIGNING_PURPOSES for v in self._versions(p)]
+        for name in private_pems:
+            with open(self._path(name), "rb") as f:
+                data = f.read()
+            try:
+                key = serialization.load_pem_private_key(data, password=None)
+            except TypeError:
+                continue  # already encrypted
+            self._replace_secret(name, self._private_pem(key))
+            changed.append(name)
+        for name in ("audit.key", "mfa.key", "ballot_integrity.key"):
+            with open(self._path(name), "rb") as f:
+                data = f.read()
+            if not data.startswith(SECRET_MAGIC):
+                self._replace_secret(name, self._wrap_secret(name, data))
+                changed.append(name)
+        self._secrets.clear()
+        return changed
+
+    def _replace_secret(self, name, data):
+        """Write to a temp file first, so a crash half way can't leave a broken key."""
+        tmp = self._path(name) + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, self._path(name))
+
     def check_permissions(self):
         """Raise if the key folder or any key file is open to other users."""
         if os.name == "nt": # Skip on Windows: it uses ACLs, not Unix permission bits

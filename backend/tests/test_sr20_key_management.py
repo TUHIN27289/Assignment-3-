@@ -145,3 +145,35 @@ def test_plain_secret_refused_once_passphrase_is_set(tmp_path):
     KeyService(str(tmp_path / "k"))  # created before a passphrase was configured
     with pytest.raises(KeyEncryptionError, match="keys encrypt"):
         KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE).audit_key()
+
+
+def test_encrypt_existing_keys(tmp_path):
+    plain = KeyService(str(tmp_path / "k"))
+    before = {"audit": plain.audit_key(), "mfa": plain.mfa_key(), "integrity": plain.integrity_key()}
+    k = KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
+    changed = k.encrypt_at_rest()
+    assert set(changed) == {"ballot_private.pem", os.path.join("signing", "results", "v1.pem"), *SECRETS}
+    assert b"ENCRYPTED PRIVATE KEY" in (tmp_path / "k" / "ballot_private.pem").read_bytes()
+    # same keys afterwards, just protected, so nothing signed or chained before is lost
+    assert {"audit": k.audit_key(), "mfa": k.mfa_key(), "integrity": k.integrity_key()} == before
+    assert k.ballot_private_key() is not None
+    assert k.encrypt_at_rest() == []  # running it again changes nothing
+
+
+def test_encrypt_needs_passphrase(tmp_path):
+    with pytest.raises(KeyEncryptionError):
+        KeyService(str(tmp_path / "k")).encrypt_at_rest()
+
+
+def test_encrypt_cli_is_audited(tmp_path):
+    from app.models import AuditEvent
+    KeyService(str(tmp_path / "k"))  # keys made before the passphrase existed
+
+    class Cfg(TestConfig):
+        KEY_DIR = str(tmp_path / "k")
+        KEY_PASSPHRASE = PASSPHRASE
+    app = create_app(Cfg)
+    out = app.test_cli_runner().invoke(args=["keys", "encrypt"])
+    assert out.exit_code == 0 and "5 key file(s) encrypted" in out.output
+    with app.app_context():
+        assert AuditEvent.query.filter_by(event="keys_encrypted_at_rest").count() == 1

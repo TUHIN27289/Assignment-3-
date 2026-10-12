@@ -1,21 +1,20 @@
-"""SR-20: public key fingerprints + admin CLI for key rotation.
+"""SR-20: public key fingerprints + admin CLI for key management.
 
-Rotation is a command-line job run by the key custodian on the server, not
-an HTTP endpoint, so it can't be triggered remotely:
+These are command-line jobs run by the key custodian on the server, not
+HTTP endpoints, so they can't be triggered remotely:
     flask --app app keys rotate results
     flask --app app keys fingerprints
+    flask --app app keys encrypt      (after setting KEY_PASSPHRASE)
 """
 import json
 
 import click
 from flask import Blueprint, current_app, jsonify
 
+from . import audit
+from .security.rbac import public
+
 bp = Blueprint("keys", __name__, url_prefix="/api/keys")
-
-
-def public(view):
-    view._public = True  # marker for the SR-02 deny-by-default check
-    return view
 
 
 @bp.get("/public")
@@ -34,6 +33,16 @@ def register_cli(app):
     def rotate(purpose):
         kid = current_app.extensions["keys"].rotate(purpose)
         click.echo(f"new {purpose} key: {kid}")
+
+    @group.command("encrypt")
+    def encrypt():
+        """Encrypt key files created before KEY_PASSPHRASE was set."""
+        changed = current_app.extensions["keys"].encrypt_at_rest()
+        for name in changed:
+            click.echo(f"encrypted {name}")
+        click.echo(f"{len(changed)} key file(s) encrypted" if changed else "all keys already encrypted")
+        if changed:
+            audit.record("keys_encrypted_at_rest", None, files=changed)
 
     @group.command("fingerprints")
     def fingerprints():
