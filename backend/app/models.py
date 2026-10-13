@@ -75,6 +75,15 @@ class PendingChange(db.Model):
     decided_at = db.Column(db.DateTime)
 
 
+class ResultsPackage(db.Model):
+    """SR-18: a signed, published results package. Aggregates only."""
+    __tablename__ = "results_packages"
+    seq = db.Column(db.Integer, primary_key=True)
+    payload = db.Column(db.Text, nullable=False)  # canonical JSON that was signed
+    kid = db.Column(db.String(16), nullable=False)
+    signature = db.Column(db.String(128), nullable=False)
+
+
 # ---------- ballot database ----------
 
 class BallotToken(db.Model):

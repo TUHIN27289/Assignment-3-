@@ -28,12 +28,14 @@ def create_app(config_class=Config):
     from .auth import bp as auth_bp
     from .ballot import bp as ballot_bp
     from .candidates import bp as candidates_bp
+    from .results import bp as results_bp
     from .key_routes import bp as keys_bp, register_cli
     from .tally import bp as tally_bp
     app.register_blueprint(audit_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(ballot_bp)
     app.register_blueprint(candidates_bp)
+    app.register_blueprint(results_bp)
     app.register_blueprint(tally_bp)
     app.register_blueprint(keys_bp)
     register_cli(app)

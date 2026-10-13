@@ -18,6 +18,7 @@ from ..ballot.crypto import (GENESIS_MAC, EncryptedBallot, ballot_digest,
                              chain_mac, decrypt_ballot)
 from ..extensions import db
 from ..models import Candidate, CastBallot, ChainHead, IntegrityAlert
+from ..results import create_package
 from .reconcile import reconcile
 
 bp = Blueprint("tally", __name__, url_prefix="/api/tally")
@@ -90,8 +91,10 @@ def run_tally():
 @permission_required("tally:run")
 def run():
     result = run_tally()
+    result["signed_package"] = create_package(result)  # SR-18
     audit.record("tally_run", g.user.id, counted=result["counted"],
-                 rejected=len(result["rejected"]))
+                 rejected=len(result["rejected"]), results_sha256=result["signed_package"]["sha256"],
+                 kid=result["signed_package"]["kid"])
     return jsonify(result)
 
 
