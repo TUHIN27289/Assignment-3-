@@ -33,6 +33,21 @@ class UserSession(db.Model):
     revoked = db.Column(db.Boolean, nullable=False, default=False)
 
 
+class ExportRequest(db.Model):
+    """SR-07: a request to export elector records."""
+    __tablename__ = "export_requests"
+    id = db.Column(db.Integer, primary_key=True)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    division = db.Column(db.String(64))  # None = whole roll
+    record_count = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.String(500), nullable=False)
+    requested_at = db.Column(db.DateTime, nullable=False)
+    status = db.Column(db.String(16), nullable=False)  # pending|approved|rejected|expired|downloaded
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    decided_at = db.Column(db.DateTime)
+    downloaded_at = db.Column(db.DateTime)
+
+
 class Voter(db.Model):
     __tablename__ = "voters"
     id = db.Column(db.Integer, primary_key=True)

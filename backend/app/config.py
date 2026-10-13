@@ -28,6 +28,8 @@ class Config:
     SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
     SESSION_ABSOLUTE_TIMEOUT = timedelta(hours=8)
     REAUTH_WINDOW = timedelta(minutes=5)
+    # SR-07: exports bigger than this need a second officer's approval
+    EXPORT_APPROVAL_THRESHOLD = 500
 
     FORCE_HTTPS = True
     RATELIMIT_STORAGE_URI = "memory://"

@@ -22,5 +22,8 @@ with app.app_context():
                              address=f"{n} Swanston St, Melbourne VIC 3000", division="Melbourne", enrolled=True))
     for role in ("enrolment_officer", "delegate", "tally_officer", "auditor"):
         db.session.add(User(email=f"{role}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role=role))
+    # SR-07 needs a second enrolment officer to approve large exports
+    db.session.add(User(email="enrolment_officer2@demo.local", password_hash=hash_password(DEMO_PASSWORD),
+                        role="enrolment_officer"))
     db.session.commit()
     print("seeded demo accounts (see seed.py for the password)")
