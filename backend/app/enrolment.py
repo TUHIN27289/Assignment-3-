@@ -17,7 +17,7 @@ from datetime import date
 from flask import Blueprint, abort, g, jsonify, request
 
 from . import audit
-from .auth import hash_password, role_required
+from .auth import hash_password, permission_required
 from .auth.sessions import recent_auth_required
 from .extensions import db
 from .models import User, Voter
@@ -64,13 +64,13 @@ def _my_voter():
 
 
 @bp.get("/me")
-@role_required("voter")
+@permission_required("enrolment:self")
 def me():
     return jsonify(_view(_my_voter()))
 
 
 @bp.post("/me/enrol")
-@role_required("voter")
+@permission_required("enrolment:self")
 @recent_auth_required
 def self_enrol():
     v = _my_voter()
@@ -88,7 +88,7 @@ def self_enrol():
 
 
 @bp.put("/me/address")
-@role_required("voter")
+@permission_required("enrolment:self")
 @recent_auth_required
 def update_address():
     v = _my_voter()
@@ -99,7 +99,7 @@ def update_address():
 
 
 @bp.get("/voters")
-@role_required("enrolment_officer")
+@permission_required("enrolment:read")
 def list_voters():
     division = request.args.get("division")
     q = db.session.query(Voter, User.email).join(User, User.id == Voter.user_id)
@@ -111,7 +111,7 @@ def list_voters():
 
 
 @bp.post("/voters")
-@role_required("enrolment_officer")
+@permission_required("enrolment:write")
 @recent_auth_required
 def register():
     data = request.get_json(silent=True) or {}
