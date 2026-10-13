@@ -1,5 +1,4 @@
 """SR-05: voter personal data encrypted at rest."""
-import logging
 from datetime import date
 
 import pytest
@@ -8,7 +7,7 @@ from sqlalchemy import text
 
 from app.auth import hash_password
 from app.extensions import db
-from app.models import User, Voter
+from app.models import AuditEvent, User, Voter
 
 from .conftest import csrf, login
 
@@ -25,6 +24,12 @@ def officer(app):
 def raw(app, column, voter_id=1):
     with app.app_context():
         return db.session.execute(text(f"SELECT {column} FROM voters WHERE id = :i"), {"i": voter_id}).scalar()
+
+
+def audit_entries(app):
+    """Every audit entry as (event, details), read from the audit database (SR-04)."""
+    with app.app_context():
+        return [(e.event, e.details) for e in AuditEvent.query.order_by(AuditEvent.seq)]
 
 
 def set_details(app):
@@ -86,21 +91,23 @@ def test_voter_sees_own_details(app, client):
     assert r["full_name"] == NAME and r["enrolled"] is True
 
 
-def test_address_update_is_audited_without_the_address(app, client, caplog):
+def test_address_update_is_audited_without_the_address(app, client):
     c = login(client, "voter1@test.local", "pw-voter")
-    with caplog.at_level(logging.INFO, logger="audit"):
-        r = client.put("/api/enrolment/me/address", json={"address": ADDRESS}, headers={"X-CSRF-Token": c})
+    r = client.put("/api/enrolment/me/address", json={"address": ADDRESS}, headers={"X-CSRF-Token": c})
     assert r.status_code == 200 and r.get_json()["address"] == ADDRESS
-    assert "address_changed" in caplog.text and "Collins" not in caplog.text
+    entries = audit_entries(app)
+    assert any(event == "address_changed" for event, _ in entries)
+    assert not any("Collins" in details for _, details in entries)
 
 
-def test_officer_can_list_and_reads_are_audited(app, client, officer, caplog):
+def test_officer_can_list_and_reads_are_audited(app, client, officer):
     set_details(app)
     login(client, "officer@test.local", "pw")
-    with caplog.at_level(logging.INFO, logger="audit"):
-        r = client.get("/api/enrolment/voters?division=Melbourne").get_json()
+    r = client.get("/api/enrolment/voters?division=Melbourne").get_json()
     assert any(v["full_name"] == NAME for v in r["voters"])
-    assert "pii_read" in caplog.text and NAME not in caplog.text
+    entries = audit_entries(app)
+    assert any(event == "pii_read" for event, _ in entries)
+    assert not any(NAME in details for _, details in entries)
 
 
 def test_voter_cannot_list_others(app, client):
