@@ -22,7 +22,7 @@ from flask import Blueprint, Response, abort, current_app, g, jsonify, request
 from sqlalchemy import update
 
 from . import audit
-from .auth import role_required
+from .auth import permission_required
 from .auth.sessions import recent_auth_required
 from .extensions import db
 from .models import ExportRequest, User, Voter
@@ -55,7 +55,7 @@ def _expire(r):
 
 
 @bp.post("")
-@role_required("enrolment_officer")
+@permission_required("enrolment:export")
 @recent_auth_required
 def request_export():
     data = request.get_json(silent=True) or {}
@@ -78,7 +78,7 @@ def request_export():
 
 
 @bp.get("")
-@role_required("enrolment_officer")
+@permission_required("enrolment:export")
 def list_requests():
     rows = ExportRequest.query.order_by(ExportRequest.id.desc()).limit(50).all()
     return jsonify(requests=[_view(_expire(r)) for r in rows])
@@ -106,14 +106,14 @@ def _decide(export_id, approve):
 
 
 @bp.post("/<int:export_id>/approve")
-@role_required("enrolment_officer")
+@permission_required("enrolment:export")
 @recent_auth_required
 def approve(export_id):
     return _decide(export_id, True)
 
 
 @bp.post("/<int:export_id>/reject")
-@role_required("enrolment_officer")
+@permission_required("enrolment:export")
 def reject(export_id):
     return _decide(export_id, False)
 
@@ -124,7 +124,7 @@ def _cell(value):
 
 
 @bp.get("/<int:export_id>/download")
-@role_required("enrolment_officer")
+@permission_required("enrolment:export")
 def download(export_id):
     r = db.session.get(ExportRequest, export_id)
     if r is None or r.requested_by != g.user.id:
