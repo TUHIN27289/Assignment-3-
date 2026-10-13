@@ -7,7 +7,7 @@ import pytest
 
 from app.auth import hash_password
 from app.extensions import db
-from app.models import ExportRequest, User, UserSession, Voter
+from app.models import AuditEvent, ExportRequest, User, UserSession, Voter
 
 from .conftest import login
 
@@ -30,6 +30,12 @@ def officer(app, n):
 
 def ask(client, token, **body):
     return client.post("/api/enrolment/exports", json={"reason": REASON, **body}, headers={"X-CSRF-Token": token})
+
+
+def audit_entries(app):
+    """Every audit entry as (event, details), read from the audit database (SR-04)."""
+    with app.app_context():
+        return [(e.event, e.details) for e in AuditEvent.query.order_by(AuditEvent.seq)]
 
 
 def rows(resp):
@@ -123,16 +129,34 @@ def test_reason_required_and_reauth_required(app, officers):
     assert r.status_code == 401 and r.get_json()["message"] == "reauth_required"
 
 
-def test_export_is_audited_with_count_not_data(app, officers, caplog):
-    import logging
+def test_export_is_audited_with_count_not_data(app, officers):
     app.config["EXPORT_APPROVAL_THRESHOLD"] = 500
     c1, t1 = officer(app, 1)
     rid = ask(c1, t1).get_json()["id"]
-    with caplog.at_level(logging.INFO, logger="audit"):
-        c1.get(f"/api/enrolment/exports/{rid}/download")
-    assert "pii_export" in caplog.text and "'records': 3" in caplog.text and "Voter 1" not in caplog.text
+    c1.get(f"/api/enrolment/exports/{rid}/download")
+    entries = audit_entries(app)
+    exported = [details for event, details in entries if event == "pii_export"]
+    assert len(exported) == 1 and '"records":3' in exported[0]
+    assert not any("Voter 1" in details for _, details in entries)
 
 
 def test_voters_cannot_export(app, client):
     c = login(client, "voter1@test.local", "pw-voter")
     assert ask(client, c).status_code == 403
+
+
+def test_threshold_boundary_is_inclusive(app, officers):
+    c1, t1 = officer(app, 1)
+    app.config["EXPORT_APPROVAL_THRESHOLD"] = 3
+    assert ask(c1, t1).get_json()["status"] == "approved"  # exactly 3 records: no second officer needed
+    app.config["EXPORT_APPROVAL_THRESHOLD"] = 2
+    assert ask(c1, t1).get_json()["status"] == "pending"  # 3 records, one over the limit
+
+
+def test_decided_request_cannot_be_decided_again(app, officers):
+    c1, t1 = officer(app, 1)
+    rid = ask(c1, t1).get_json()["id"]
+    c2, t2 = officer(app, 2)
+    assert c2.post(f"/api/enrolment/exports/{rid}/approve", headers={"X-CSRF-Token": t2}).status_code == 200
+    assert c2.post(f"/api/enrolment/exports/{rid}/reject", headers={"X-CSRF-Token": t2}).status_code == 409
+    assert c2.post(f"/api/enrolment/exports/{rid}/approve", headers={"X-CSRF-Token": t2}).status_code == 409
