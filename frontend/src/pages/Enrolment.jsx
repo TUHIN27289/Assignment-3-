@@ -10,13 +10,51 @@ export default function Enrolment({ onSessionLost }) {
   const [form, setForm] = useState(EMPTY)
   const [created, setCreated] = useState(null)
   const [error, setError] = useState('')
+  const [exports, setExports] = useState([])
+  const [exportReason, setExportReason] = useState('')
 
   const fail = useCallback((e) => (e.status === 401 ? onSessionLost() : setError(e.message)), [onSessionLost])
   const load = useCallback((div) => {
     const q = div ? `?division=${encodeURIComponent(div)}` : ''
     api(`/api/enrolment/voters${q}`).then((d) => setVoters(d.voters)).catch(fail)
   }, [fail])
-  useEffect(() => { load('') }, [load])
+  const loadExports = useCallback(() => api('/api/enrolment/exports').then((d) => setExports(d.requests)).catch(fail), [fail])
+  useEffect(() => { load(''); loadExports() }, [load, loadExports])
+
+  // SR-07
+  async function requestExport(e) {
+    e.preventDefault()
+    setError('')
+    try {
+      await api('/api/enrolment/exports', { method: 'POST', body: { division: division || null, reason: exportReason } })
+      setExportReason('')
+      loadExports()
+    } catch (err) { fail(err) }
+  }
+
+  async function decide(id, action) {
+    setError('')
+    try {
+      await api(`/api/enrolment/exports/${id}/${action}`, { method: 'POST' })
+      loadExports()
+    } catch (err) { fail(err) }
+  }
+
+  async function download(id) {
+    setError('')
+    const r = await fetch(`/api/enrolment/exports/${id}/download`, { credentials: 'same-origin' })
+    if (!r.ok) {
+      setError((await r.json().catch(() => ({}))).message || 'Download failed')
+    } else {
+      const url = URL.createObjectURL(await r.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `roll-export-${id}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+    loadExports()
+  }
 
   async function register(e) {
     e.preventDefault()
@@ -55,6 +93,36 @@ export default function Enrolment({ onSessionLost }) {
           ))}
         </tbody>
       </table>
+
+      <form onSubmit={requestExport} style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2>Export electors {division ? `(${division})` : '(whole roll)'}</h2>
+        <p className="muted">Large exports need approval from a second enrolment officer. Each export downloads once.</p>
+        <label>Reason<input value={exportReason} onChange={(e) => setExportReason(e.target.value)} minLength={10} required /></label>
+        <div className="row"><button type="submit" className="secondary">Request export</button></div>
+      </form>
+      {exports.length > 0 && (
+        <table className="results">
+          <caption>Export requests</caption>
+          <tbody>
+            {exports.map((x) => (
+              <tr key={x.id}>
+                <td>#{x.id} · {x.division || 'whole roll'} · {x.record_count} records<br /><span className="muted">{x.reason}</span></td>
+                <td>{x.status}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {x.status === 'pending' && !x.mine && (
+                    <>
+                      <button className="link" onClick={() => decide(x.id, 'approve')}>Approve</button>{' · '}
+                      <button className="link" onClick={() => decide(x.id, 'reject')}>Reject</button>
+                    </>
+                  )}
+                  {x.status === 'pending' && x.mine && <span className="muted">waiting for another officer</span>}
+                  {x.status === 'approved' && x.mine && <button className="link" onClick={() => download(x.id)}>Download</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       <form onSubmit={register} style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2>Register a citizen</h2>
