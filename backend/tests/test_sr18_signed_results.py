@@ -119,3 +119,52 @@ def test_only_tally_can_create(app, client):
     c = login(client, "voter1@test.local", "pw-voter")
     assert client.post("/api/tally/run", headers={"X-CSRF-Token": c}).status_code == 403
     assert app.test_client().get("/api/results/latest").status_code == 404
+
+
+def _offline_files(tmp_path, client, pkg):
+    pkg_file, keys_file = tmp_path / "package.json", tmp_path / "keys.json"
+    pkg_file.write_text(json.dumps(pkg))
+    keys_file.write_text(json.dumps(client.get("/api/keys/public").get_json()))
+    return str(pkg_file), str(keys_file)
+
+
+def test_offline_verifier_accepts_genuine_package(app, client, tmp_path):
+    import subprocess, sys, pathlib
+    pkg = publish(app, client)
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "verify_results.py"
+    out = subprocess.run([sys.executable, str(script), *_offline_files(tmp_path, client, pkg)],
+                         capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout.startswith("VALID")
+
+
+def test_offline_verifier_rejects_changed_numbers(app, client, tmp_path):
+    import subprocess, sys, pathlib
+    pkg = publish(app, client)
+    div = next(iter(pkg["package"]["divisions"]))
+    cand = next(iter(pkg["package"]["divisions"][div]))
+    pkg["package"]["divisions"][div][cand] += 1000
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "verify_results.py"
+    out = subprocess.run([sys.executable, str(script), *_offline_files(tmp_path, client, pkg)],
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and "does NOT match" in out.stdout
+
+
+def test_offline_verifier_rejects_untrusted_key(app, client, tmp_path):
+    """Someone signs fake results with their own key and claims the AEC's key id."""
+    import base64
+    import importlib.util
+    import pathlib
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "verify_results.py"
+    spec = importlib.util.spec_from_file_location("verify_results", script)
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+
+    pkg = publish(app, client)
+    forged = dict(pkg, package=dict(pkg["package"], ballots_counted=999))
+    forged["signature"] = base64.urlsafe_b64encode(
+        ed25519.Ed25519PrivateKey.generate().sign(verifier.canonical(forged["package"]))).decode()
+    forged.pop("sha256")
+    keys = verifier.load_keys(json.dumps(client.get("/api/keys/public").get_json()))
+    valid, message = verifier.verify(forged, keys)
+    assert not valid and "does NOT match" in message
