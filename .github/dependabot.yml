@@ -1,0 +1,16 @@
+# SR-08: automatic update PRs for vulnerable or outdated dependencies.
+# Each PR still has to pass CI (tests, SAST, audits) before merging.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
