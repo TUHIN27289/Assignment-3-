@@ -171,7 +171,7 @@ def logout():
 
 
 @bp.post("/logout-all")
-@login_required
+@permission_required("self:read")
 def logout_all():
     n = sessions.revoke_all(g.user.id)
     session.clear()
@@ -180,7 +180,7 @@ def logout_all():
 
 
 @bp.post("/reauth")
-@login_required
+@permission_required("self:read")
 @limiter.limit("5 per minute")
 def reauth():
     """SR-06: confirm the password again before a sensitive change."""
