@@ -37,7 +37,8 @@ class Config:
 
 class TestConfig(Config):
     TESTING = True
-    SECRET_KEY = "test-secret"
+    # unit tests only (SR-08: marked for Bandit)
+    SECRET_KEY = "test-secret"  # nosec B105
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_BINDS = {"ballots": "sqlite://"}
     FORCE_HTTPS = False

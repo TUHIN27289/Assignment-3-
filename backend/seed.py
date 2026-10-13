@@ -4,7 +4,8 @@ from app.auth import hash_password
 from app.extensions import db
 from app.models import Candidate, User, Voter
 
-DEMO_PASSWORD = "Demo-Only-2026!"
+# Local demo accounts only, never deployed (SR-08: marked for Bandit)
+DEMO_PASSWORD = "Demo-Only-2026!"  # nosec B105
 
 app = create_app()
 with app.app_context():
