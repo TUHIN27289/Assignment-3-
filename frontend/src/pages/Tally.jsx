@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { downloadPackage } from '../download'
+import SignatureInfo from './SignatureInfo'
 import ReconciliationCheck, { ReconciliationSummary } from './Reconciliation'
 
 export default function Tally({ onSessionLost }) {
@@ -45,6 +47,20 @@ export default function Tally({ onSessionLost }) {
               </ul>
             </div>
           )}
+          {result.signed_package
+            ? (
+              <div style={{ marginTop: 12 }}>
+                <strong>Signed results package published.</strong>
+                <SignatureInfo pkg={result.signed_package} />
+                <button className="secondary" onClick={() => downloadPackage(result.signed_package)}>Download signed package</button>
+              </div>
+            )
+            : (
+              <div className="alert">
+                <strong>Results not published.</strong> Reconciliation failed, so nothing was signed.
+                These numbers are for investigation only.
+              </div>
+            )}
           {Object.entries(result.first_preferences).map(([division, counts]) => (
             <table key={division} className="results">
               <caption>{division}: first preferences</caption>

@@ -5,6 +5,7 @@ import Delegate from './pages/Delegate'
 import Login from './pages/Login'
 import ReconciliationCheck from './pages/Reconciliation'
 import Receipt from './pages/Receipt'
+import Results from './pages/Results'
 import Tally from './pages/Tally'
 import Vote from './pages/Vote'
 
@@ -19,6 +20,7 @@ const ROLE_LABELS = {
 export default function App() {
   const [user, setUser] = useState(undefined) // undefined = still checking
   const [receipt, setReceipt] = useState(null)
+  const [showResults, setShowResults] = useState(false)
 
   useEffect(() => {
     getMe().then(setUser).catch(() => setUser(null))
@@ -38,6 +40,11 @@ export default function App() {
     <>
       <header className="topbar">
         <span className="brand">Electronic Voting Platform</span>
+        {!user && (
+          <button className="link" onClick={() => setShowResults(!showResults)}>
+            {showResults ? 'Back' : 'Results'}
+          </button>
+        )}
         {user && (
           <span className="who">
             {user.email} · {ROLE_LABELS[user.role] || user.role}
@@ -46,8 +53,9 @@ export default function App() {
         )}
       </header>
       <main className="page">
-        {receipt && <Receipt trackingCode={receipt} onFinish={() => setReceipt(null)} />}
-        {!user && !receipt && <Login onLogin={() => getMe().then(setUser)} />}
+        {!user && showResults && <Results />}
+        {!showResults && receipt && <Receipt trackingCode={receipt} onFinish={() => setReceipt(null)} />}
+        {!user && !receipt && !showResults && <Login onLogin={() => getMe().then(setUser)} />}
         {user?.role === 'voter' && (
           <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
         )}
