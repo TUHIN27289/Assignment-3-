@@ -74,8 +74,14 @@ def run_tally():
         if choice is not None:
             first_prefs[(b.division, choice)] += 1
 
-    names = {c.id: c.name for c in Candidate.query}
+    # Every candidate still in the count is listed, 0 votes included, so a
+    # published result can't quietly leave anyone out
+    candidates = Candidate.query.all()
+    names = {c.id: c.name for c in candidates}
     results = {}
+    for c in candidates:
+        if c.id not in excluded:
+            results.setdefault(c.division, {})[c.name] = 0
     for (division, candidate_id), n in first_prefs.items():
         results.setdefault(division, {})[names.get(candidate_id, str(candidate_id))] = n
     return {
@@ -91,6 +97,13 @@ def run_tally():
 @permission_required("tally:run")
 def run():
     result = run_tally()
+    if not result["reconciliation"]["ok"]:
+        # SR-18/SR-19: the officer can still see the numbers to investigate,
+        # but nothing is signed or published until the records agree
+        result["signed_package"] = None
+        audit.record("results_publication_blocked", g.user.id, counted=result["counted"],
+                     problems=result["reconciliation"]["problems"])
+        return jsonify(result)
     result["signed_package"] = create_package(result)  # SR-18
     audit.record("tally_run", g.user.id, counted=result["counted"],
                  rejected=len(result["rejected"]), results_sha256=result["signed_package"]["sha256"],

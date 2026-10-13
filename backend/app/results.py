@@ -11,8 +11,11 @@ network in between:
     a key rotation
   - generated_at timestamp and a sequence number inside the signed data,
     so an old package can't be passed off as the latest recount
-  - the reconciliation result is signed in, so nobody can publish "clean"
-    looking numbers from a tally that failed reconciliation
+  - nothing is signed if reconciliation failed (SR-19): the AEC doesn't vouch
+    for numbers that don't add up. The reconciliation result is also signed
+    into the package, so this can be checked by anyone
+  - every candidate still in the count is listed, 0 votes included, and
+    excluded candidates are listed separately
 
 Anyone can fetch and verify packages. Only the tally creates them.
 """
@@ -36,8 +39,14 @@ def _canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
+class ReconciliationFailed(RuntimeError):
+    pass
+
+
 def create_package(tally_result):
     """Build, sign and store a results package from a run_tally() result."""
+    if not tally_result["reconciliation"]["ok"]:
+        raise ReconciliationFailed("results are not signed while reconciliation fails")
     last = db.session.query(db.func.max(ResultsPackage.seq)).scalar() or 0
     payload = {
         "v": 1,

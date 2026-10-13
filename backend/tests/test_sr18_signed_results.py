@@ -77,17 +77,42 @@ def test_unknown_kid_fails(app, client):
     assert verify(app.test_client(), dict(pkg, kid="0" * 16)) is False
 
 
-def test_failed_reconciliation_is_signed_in(app, client):
+def _break_reconciliation(app):
     from app.extensions import db
     from app.models import Voter
-    for e in ("voter1@test.local", "voter2@test.local"):
-        vote(app, app.test_client(), e)
     with app.app_context():
         Voter.query.filter_by(ballot_issued=True).first().ballot_issued = False
         db.session.commit()
+
+
+def test_failed_reconciliation_blocks_publication(app, client):
+    from app.models import AuditEvent, ResultsPackage
+    for e in ("voter1@test.local", "voter2@test.local"):
+        vote(app, app.test_client(), e)
+    _break_reconciliation(app)
     c = login(client, "tally@test.local", "pw-tally")
-    pkg = client.post("/api/tally/run", headers={"X-CSRF-Token": c}).get_json()["signed_package"]
-    assert pkg["package"]["reconciliation_ok"] is False
+    r = client.post("/api/tally/run", headers={"X-CSRF-Token": c}).get_json()
+    assert r["reconciliation"]["ok"] is False and r["signed_package"] is None
+    assert r["counted"] == 2  # the officer still sees the numbers to investigate
+    assert app.test_client().get("/api/results/latest").status_code == 404
+    with app.app_context():
+        assert ResultsPackage.query.count() == 0
+        assert AuditEvent.query.filter_by(event="results_publication_blocked").count() == 1
+
+
+def test_package_cannot_be_signed_when_reconciliation_fails(app):
+    import pytest
+    from app.results import ReconciliationFailed, create_package
+    with app.app_context(), pytest.raises(ReconciliationFailed):
+        create_package({"counted": 0, "rejected": [], "excluded": [], "first_preferences": {},
+                        "reconciliation": {"ok": False}})
+
+
+def test_every_candidate_listed_including_zero_votes(app, client):
+    pkg = publish(app, client, voters=("voter1@test.local",))
+    melbourne = pkg["package"]["divisions"]["Melbourne"]
+    assert set(melbourne) == {"Adams", "Brown", "Chen", "Davis"}
+    assert sum(melbourne.values()) == 1 and list(melbourne.values()).count(0) == 3
 
 
 def test_only_tally_can_create(app, client):
