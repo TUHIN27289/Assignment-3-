@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getMe, logout, onReauthNeeded } from './api'
+import Audit from './pages/Audit'
 import Enrolment from './pages/Enrolment'
 import Login from './pages/Login'
 import MyEnrolment from './pages/MyEnrolment'
@@ -59,7 +60,8 @@ export default function App() {
         )}
         {user?.role === 'tally_officer' && <Tally onSessionLost={onSessionLost} />}
         {user?.role === 'enrolment_officer' && <Enrolment onSessionLost={onSessionLost} />}
-        {user && !['voter', 'tally_officer', 'enrolment_officer'].includes(user.role) && (
+        {user?.role === 'auditor' && <Audit onSessionLost={onSessionLost} />}
+        {user && !['voter', 'tally_officer', 'enrolment_officer', 'auditor'].includes(user.role) && (
           <p>No screens for this role yet.</p>
         )}
       </main>

@@ -11,6 +11,8 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get("IDENTITY_DB_URL", "sqlite:///identity.db")
     SQLALCHEMY_BINDS = {
         "ballots": os.environ.get("BALLOT_DB_URL", "sqlite:///ballots.db"),
+        # Audit log in its own database so it can have its own access rules (SR-04)
+        "audit": os.environ.get("AUDIT_DB_URL", "sqlite:///audit.db"),
     }
 
     # Key material is kept outside the source tree (SR-20).
@@ -40,5 +42,5 @@ class TestConfig(Config):
     # unit tests only (SR-08: marked for Bandit)
     SECRET_KEY = "test-secret"  # nosec B105
     SQLALCHEMY_DATABASE_URI = "sqlite://"
-    SQLALCHEMY_BINDS = {"ballots": "sqlite://"}
+    SQLALCHEMY_BINDS = {"ballots": "sqlite://", "audit": "sqlite://"}
     FORCE_HTTPS = False

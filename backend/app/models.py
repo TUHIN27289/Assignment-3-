@@ -1,12 +1,15 @@
 """Database models.
 
-Two databases:
+Three databases:
   - identity (default bind): users, voters, candidates
   - ballots (bind "ballots"): ballot tokens and encrypted ballots
+  - audit (bind "audit"): append-only audit log
 
 Nothing in the ballots database stores a voter id, a timestamp or an IP
 address. That is the core of SR-14.
 """
+from sqlalchemy import DDL, event
+
 from .extensions import db
 from .security.pii import EncryptedText
 
@@ -20,6 +23,13 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     # voter | enrolment_officer | delegate | tally_officer | auditor
     role = db.Column(db.String(32), nullable=False)
+    # SR-03 lockout
+    failed_logins = db.Column(db.Integer, nullable=False, default=0)
+    locked_until = db.Column(db.DateTime)
+    # SR-01 MFA: TOTP secret encrypted with the MFA key, never stored in plain
+    mfa_secret_enc = db.Column(db.LargeBinary)
+    mfa_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    mfa_last_step = db.Column(db.Integer)  # last accepted 30 s step, blocks code replay
 
 
 class UserSession(db.Model):
@@ -117,3 +127,42 @@ class IntegrityAlert(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     seq = db.Column(db.Integer)
     reason = db.Column(db.String(255), nullable=False)
+
+
+# ---------- audit database (SR-04) ----------
+
+class AuditEvent(db.Model):
+    __bind_key__ = "audit"
+    __tablename__ = "audit_events"
+    seq = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    occurred_at = db.Column(db.String(32), nullable=False)  # ISO 8601 UTC, or date only
+    actor_id = db.Column(db.Integer)
+    event = db.Column(db.String(64), nullable=False)
+    source_ip = db.Column(db.String(64))
+    details = db.Column(db.Text, nullable=False)  # canonical JSON, incl. before/after values
+    prev_hash = db.Column(db.String(64), nullable=False)
+    entry_hash = db.Column(db.String(64), nullable=False)
+
+
+class AuditHead(db.Model):
+    __bind_key__ = "audit"
+    __tablename__ = "audit_head"
+    id = db.Column(db.Integer, primary_key=True)
+    last_seq = db.Column(db.Integer, nullable=False, default=0)
+    last_hash = db.Column(db.String(64), nullable=False)
+
+
+# The database itself refuses UPDATE and DELETE on audit rows, so even code
+# with a bug (or someone with normal DB access) can only append.
+for op in ("UPDATE", "DELETE"):
+    event.listen(AuditEvent.__table__, "after_create", DDL(
+        f"CREATE TRIGGER audit_no_{op.lower()} BEFORE {op} ON audit_events "
+        f"BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END"
+    ).execute_if(dialect="sqlite"))
+
+event.listen(AuditEvent.__table__, "after_create", DDL("""
+CREATE FUNCTION audit_append_only() RETURNS trigger AS $$
+BEGIN RAISE EXCEPTION 'audit log is append-only'; END; $$ LANGUAGE plpgsql;
+CREATE TRIGGER audit_no_change BEFORE UPDATE OR DELETE ON audit_events
+FOR EACH ROW EXECUTE FUNCTION audit_append_only();
+""").execute_if(dialect="postgresql"))

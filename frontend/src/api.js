@@ -56,6 +56,18 @@ export async function login(email, password) {
   await refreshCsrf()
   const data = await api('/api/auth/login', { method: 'POST', body: { email, password } })
   csrfToken = data.csrf_token // server issues a new session on login
+  return data // { role } or { mfa_required } or { mfa_setup_required }
+}
+
+// SR-01: second step for staff accounts. The server issues a fresh session
+// (and CSRF token) once the code is accepted.
+export async function mfaSetup() {
+  return api('/api/auth/mfa/setup', { method: 'POST' })
+}
+
+export async function mfaVerify(code) {
+  const data = await api('/api/auth/mfa/verify', { method: 'POST', body: { code } })
+  csrfToken = data.csrf_token
   return data
 }
 

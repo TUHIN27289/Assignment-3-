@@ -20,7 +20,8 @@ import uuid
 from flask import Blueprint, abort, current_app, g, jsonify, request
 from sqlalchemy import update
 
-from ..auth import role_required
+from ..auth import permission_required
+from ..security.rbac import public
 from ..extensions import db
 from ..models import BallotToken, Candidate, CastBallot, ChainHead, Voter
 from .crypto import GENESIS_MAC, ballot_digest, chain_mac, encrypt_ballot
@@ -34,7 +35,7 @@ def _hash_token(token):
 
 
 @bp.get("/candidates")
-@role_required("voter")
+@permission_required("ballot:vote")
 def candidates():
     voter = Voter.query.filter_by(user_id=g.user.id).first()
     if voter is None:
@@ -45,7 +46,7 @@ def candidates():
 
 
 @bp.post("/token")
-@role_required("voter")
+@permission_required("ballot:vote")
 def issue_token():
     voter = Voter.query.filter_by(user_id=g.user.id).first()
     if voter is None or not voter.enrolled:
@@ -96,6 +97,7 @@ def append_ballot(ballot, division):
 
 
 @bp.post("/cast")
+@public  # anonymous on purpose (SR-14), the one-time token is the credential
 def cast():
     data = request.get_json(silent=True) or {}
     token = data.get("ballot_token")
