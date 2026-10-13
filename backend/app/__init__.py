@@ -19,10 +19,12 @@ def create_app(config_class=Config):
     from .auth import bp as auth_bp
     from .ballot import bp as ballot_bp
     from .enrolment import bp as enrolment_bp
+    from .exports import bp as exports_bp
     from .tally import bp as tally_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(ballot_bp)
     app.register_blueprint(enrolment_bp)
+    app.register_blueprint(exports_bp)
     app.register_blueprint(tally_bp)
 
     @app.errorhandler(HTTPException)
