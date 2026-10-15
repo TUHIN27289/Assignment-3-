@@ -41,7 +41,8 @@ def test_package_holds_aggregates_only(app, client):
     pkg = publish(app, client)
     text = json.dumps(pkg)
     assert set(pkg["package"]) == {"v", "election_id", "sequence", "generated_at", "method", "ballots_counted",
-                                   "ballots_rejected", "reconciliation_ok", "excluded_candidates", "divisions"}
+                                   "ballots_rejected", "exhausted_ballots", "reconciliation_ok", "excluded_candidates",
+                                   "divisions"}
     for word in ("ballot_id", "digest", "ciphertext", "tracking", "voter", "token", "seq\""):
         assert word not in text
     for counts in pkg["package"]["divisions"].values():
@@ -183,3 +184,20 @@ def test_verify_is_rate_limited(app, client):
     codes = [c.post("/api/results/verify", json=body, headers={"X-CSRF-Token": csrf(c)}).status_code
              for _ in range(31)]
     assert codes[:30] == [200] * 30 and codes[30] == 429
+
+
+def test_totals_plus_exhausted_add_up_to_ballots_counted(app, client):
+    """A voter who only ranked excluded candidates counts as exhausted, not as a vanished ballot."""
+    from app.extensions import db
+    from app.models import Candidate
+    for e in ("voter1@test.local", "voter2@test.local"):
+        vote(app, app.test_client(), e)
+    with app.app_context():
+        for c in Candidate.query.all():  # exclude everyone (as approved court orders would)
+            c.excluded, c.exclusion_reason = True, "Court of Disputed Returns order 2026/17"
+        db.session.commit()
+    c = login(client, "tally@test.local", "pw-tally")
+    pkg = client.post("/api/tally/run", headers={"X-CSRF-Token": c}).get_json()["signed_package"]["package"]
+    votes = sum(n for counts in pkg["divisions"].values() for n in counts.values())
+    assert pkg["exhausted_ballots"] == 2
+    assert votes + pkg["exhausted_ballots"] == pkg["ballots_counted"] == 2

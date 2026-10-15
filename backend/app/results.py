@@ -15,7 +15,9 @@ network in between:
     for numbers that don't add up. The reconciliation result is also signed
     into the package, so this can be checked by anyone
   - every candidate still in the count is listed, 0 votes included, and
-    excluded candidates are listed separately
+    excluded candidates are listed separately. Ballots whose preferences were
+    all excluded are signed in as exhausted_ballots, so the totals add up to
+    ballots_counted
 
 Anyone can fetch and verify packages. Only the tally creates them. The
 public verify endpoint is rate limited per IP and refuses oversized bodies,
@@ -60,6 +62,7 @@ def create_package(tally_result):
         "method": "house-first-preferences",
         "ballots_counted": tally_result["counted"],
         "ballots_rejected": len(tally_result["rejected"]),
+        "exhausted_ballots": tally_result["exhausted"],
         "reconciliation_ok": tally_result["reconciliation"]["ok"],
         "excluded_candidates": tally_result["excluded"],
         "divisions": tally_result["first_preferences"],

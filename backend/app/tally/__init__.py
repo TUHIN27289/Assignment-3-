@@ -67,12 +67,15 @@ def run_tally():
     # ballot counts for that voter's next preference instead
     excluded = {c.id for c in Candidate.query.filter_by(excluded=True)}
     first_prefs = Counter()
+    exhausted = 0  # every preference on the ballot was excluded, so it counts for nobody
     for b in valid:
         ballot = decrypt_ballot(EncryptedBallot(b.ciphertext, b.nonce, b.wrapped_key),
                                 private_key, b.ballot_id)
         choice = next((c for c in ballot["house"] if c not in excluded), None)
         if choice is not None:
             first_prefs[(b.division, choice)] += 1
+        else:
+            exhausted += 1
 
     # Every candidate still in the count is listed, 0 votes included, so a
     # published result can't quietly leave anyone out
@@ -89,6 +92,7 @@ def run_tally():
         "reconciliation": reconciliation,
         "rejected": [{"seq": s, "reason": r} for s, r in problems],
         "first_preferences": results,
+        "exhausted": exhausted,  # candidate totals + exhausted == counted
         "excluded": sorted(names.get(i, str(i)) for i in excluded),
     }
 

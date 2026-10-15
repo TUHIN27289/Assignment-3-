@@ -34,6 +34,7 @@ export default function Results() {
       {pkg.package.excluded_candidates.length > 0 && (
         <p className="muted">Excluded by court order: {pkg.package.excluded_candidates.join(', ')}</p>
       )}
+      {pkg.package.exhausted_ballots > 0 && <p className="muted">{pkg.package.exhausted_ballots} ballot(s) exhausted: every preference on them was excluded.</p>}
       {Object.entries(pkg.package.divisions).map(([division, counts]) => (
         <table key={division} className="results">
           <caption>{division}: first preferences</caption>

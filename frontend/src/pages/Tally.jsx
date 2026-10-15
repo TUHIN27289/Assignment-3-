@@ -37,6 +37,7 @@ export default function Tally({ onSessionLost }) {
           <ReconciliationSummary result={result.reconciliation} />
           <p><strong>{result.counted}</strong> ballots verified and counted.</p>
           {result.excluded.length > 0 && <p className="muted">Excluded by court order: {result.excluded.join(', ')}</p>}
+          {result.exhausted > 0 && <p className="muted">{result.exhausted} ballot(s) exhausted: every preference on them was excluded.</p>}
           {result.rejected.length > 0 && (
             <div className="alert">
               <strong>{result.rejected.length} integrity problem(s):</strong>
