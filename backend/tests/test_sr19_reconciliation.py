@@ -96,10 +96,17 @@ def test_tally_includes_reconciliation(app):
 
 def test_endpoint_for_tally_and_auditor_only(app, client):
     c = login(client, "voter1@test.local", "pw-voter")
-    assert client.get("/api/tally/reconcile").status_code == 403
+    assert client.post("/api/tally/reconcile", headers={"X-CSRF-Token": c}).status_code == 403
     client.post("/api/auth/logout", headers={"X-CSRF-Token": c})
+    t = login(client, "tally@test.local", "pw-tally")
+    assert client.post("/api/tally/reconcile", headers={"X-CSRF-Token": t}).get_json()["ok"] is True
+
+
+def test_reconcile_endpoint_needs_post_with_csrf(app, client):
+    """It writes alerts and an audit entry, so a GET or a forged cross-site POST must not trigger it."""
     login(client, "tally@test.local", "pw-tally")
-    assert client.get("/api/tally/reconcile").get_json()["ok"] is True
+    assert client.get("/api/tally/reconcile").status_code == 405
+    assert client.post("/api/tally/reconcile").status_code == 403  # no CSRF token
 
 
 def test_token_moved_to_another_division_detected(app):

@@ -27,7 +27,7 @@ export default function ReconciliationCheck({ onSessionLost }) {
     setBusy(true)
     setError('')
     try {
-      setResult(await api('/api/tally/reconcile'))
+      setResult(await api('/api/tally/reconcile', { method: 'POST' }))
     } catch (e) {
       if (e.status === 401) onSessionLost()
       else setError(e.message)

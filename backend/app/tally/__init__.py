@@ -111,7 +111,7 @@ def run():
     return jsonify(result)
 
 
-@bp.get("/reconcile")
+@bp.post("/reconcile")  # POST: it records alerts and an audit entry, so it needs CSRF protection
 @permission_required("tally:reconcile")
 def reconcile_endpoint():
     result = reconcile()
