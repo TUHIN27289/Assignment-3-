@@ -22,7 +22,8 @@ SR-20 rules enforced here:
   - the app refuses to start if the key folder or files are readable by
     other users (folder 0700, files 0600)
   - signing keys are versioned and can be rotated. Old public keys are kept,
-    so anything signed before a rotation can still be verified. Every
+    so anything signed before a rotation can still be verified, and old
+    private keys are deleted, so only the current key can sign. Every
     signature carries a key id (kid) saying which key made it. Every
     rotation is written to the audit log (SR-04).
 """
@@ -178,7 +179,7 @@ class KeyService:
             raise KeyEncryptionError("set KEY_PASSPHRASE first")
         changed = []
         private_pems = ["ballot_private.pem"] + [
-            os.path.join("signing", p, f"v{v}.pem") for p in self.SIGNING_PURPOSES for v in self._versions(p)]
+            os.path.join("signing", p, f"v{self._versions(p)[-1]}.pem") for p in self.SIGNING_PURPOSES]
         for name in private_pems:
             with open(self._path(name), "rb") as f:
                 data = f.read()
@@ -221,7 +222,8 @@ class KeyService:
         if problems:
             raise KeyPermissionError("; ".join(problems))
 
-    # versioned signing keys: KEY_DIR/signing/<purpose>/v<N>.pem (+ pub-v<N>.pem)
+    # versioned signing keys: KEY_DIR/signing/<purpose>/pub-v<N>.pem for every
+    # version, and v<N>.pem (private) for the current version only
 
     def _signing_dir(self, purpose):
         if purpose not in self.SIGNING_PURPOSES:
@@ -232,20 +234,38 @@ class KeyService:
         return d
 
     def _versions(self, purpose):
+        """A version exists once its public key is in place."""
         d = self._signing_dir(purpose)
-        return sorted(int(n[1:-4]) for n in os.listdir(d) if n.startswith("v") and n.endswith(".pem"))
+        return sorted(int(n[5:-4]) for n in os.listdir(d) if n.startswith("pub-v") and n.endswith(".pem"))
+
+    @staticmethod
+    def _write_atomic(path, data, mode):
+        """Write to a temp file and rename it into place, so a crash never leaves a half-written key."""
+        tmp = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
 
     def rotate(self, purpose):
-        """Create a new signing key version and make it current. Returns its kid."""
+        """Create a new signing key version and make it current. Returns its kid.
+
+        Order matters: the private key is written first, then the public key,
+        which is what makes the version count. A crash part way leaves the
+        previous version current and every published public key readable.
+        Once the new version is in place, older private keys are deleted, so
+        only the current one could ever sign. Old public keys stay, so
+        anything signed earlier still verifies.
+        """
         d = self._signing_dir(purpose)
         version = (self._versions(purpose) or [0])[-1] + 1
         key = ed25519.Ed25519PrivateKey.generate()
-        fd = os.open(os.path.join(d, f"v{version}.pem"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(self._private_pem(key))
-        with open(os.path.join(d, f"pub-v{version}.pem"), "wb") as f:
-            f.write(key.public_key().public_bytes(serialization.Encoding.PEM,
-                                                  serialization.PublicFormat.SubjectPublicKeyInfo))
+        self._write_atomic(os.path.join(d, f"v{version}.pem"), self._private_pem(key), 0o600)
+        self._write_atomic(os.path.join(d, f"pub-v{version}.pem"), key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo), 0o644)
+        for name in os.listdir(d):
+            if name.startswith("v") and name.endswith(".pem") and name != f"v{version}.pem":
+                os.remove(os.path.join(d, name))
         return fingerprint(key.public_key())
 
     def signing_key(self, purpose):

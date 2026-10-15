@@ -219,3 +219,34 @@ def test_rotate_unknown_purpose_is_refused(app):
     out = app.test_cli_runner().invoke(args=["keys", "rotate", "ballot"])
     assert out.exit_code != 0
     assert set(app.extensions["keys"].public_keys("results")) == before
+
+
+def test_rotation_deletes_old_private_keys(tmp_path):
+    k = KeyService(str(tmp_path / "k"))
+    k.rotate("results")
+    k.rotate("results")
+    files = sorted(os.listdir(tmp_path / "k" / "signing" / "results"))
+    assert files == ["pub-v1.pem", "pub-v2.pem", "pub-v3.pem", "v3.pem"]
+    assert len(k.public_keys("results")) == 3
+
+
+def test_crash_during_rotation_leaves_keys_usable(tmp_path, monkeypatch):
+    """Simulate the server dying after the new private key is written but before its public key."""
+    k = KeyService(str(tmp_path / "k"))
+    old_kid = k.signing_key("results")[0]
+    real_replace, calls = os.replace, []
+
+    def crash_on_public(src, dst):
+        calls.append(dst)
+        if os.path.basename(dst).startswith("pub-"):
+            raise OSError("power cut")
+        return real_replace(src, dst)
+    monkeypatch.setattr(os, "replace", crash_on_public)
+    with pytest.raises(OSError):
+        k.rotate("results")
+    monkeypatch.setattr(os, "replace", real_replace)
+
+    assert k.signing_key("results")[0] == old_kid          # previous version still current
+    assert set(k.public_keys("results")) == {old_kid}       # no broken public key listing
+    new_kid = k.rotate("results")                           # and rotation recovers cleanly
+    assert set(k.public_keys("results")) == {old_kid, new_kid}
