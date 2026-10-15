@@ -3,6 +3,9 @@
 reconcile() (SR-19) and verify_chain() (SR-15) both run before anything
 is counted.
 Only ballots that pass are decrypted (SR-13, private key used here only).
+Nothing is decrypted or counted before polls close (ELECTION_CLOSES_AT), so
+no one, not even a tally officer, can see early trends while people are
+still voting. Reconciliation (counts of records only) can run at any time.
 Candidates excluded through dual control (SR-17) are skipped, and each
 ballot counts for that voter's next preference instead.
 Counting is first preferences only. Full preferential counting (seats
@@ -10,7 +13,7 @@ decided over several rounds) is out of scope for the prototype.
 """
 from collections import Counter
 
-from flask import Blueprint, current_app, g, jsonify
+from flask import Blueprint, abort, current_app, g, jsonify
 
 from .. import audit
 from ..auth import permission_required
@@ -18,7 +21,7 @@ from ..ballot.crypto import (GENESIS_MAC, EncryptedBallot, ballot_digest,
                              chain_mac, decrypt_ballot)
 from ..extensions import db
 from ..models import Candidate, CastBallot, ChainHead, IntegrityAlert
-from ..results import create_package, voting_closed
+from ..results import VotingStillOpen, create_package, voting_closed
 from .reconcile import reconcile
 
 bp = Blueprint("tally", __name__, url_prefix="/api/tally")
@@ -55,6 +58,9 @@ def verify_chain(integrity_key):
 
 
 def run_tally():
+    closed, reason = voting_closed()
+    if not closed:
+        raise VotingStillOpen(reason)  # checked before any ballot is decrypted
     keys = current_app.extensions["keys"]
     reconciliation = reconcile()  # SR-19, before anything is decrypted
     valid, problems = verify_chain(keys.integrity_key())
@@ -100,12 +106,14 @@ def run_tally():
 @bp.post("/run")
 @permission_required("tally:run")
 def run():
-    result = run_tally()
-    # SR-18/SR-19: the officer can still see the numbers to investigate, but
-    # nothing is signed or published until voting has closed and the records agree
-    _, reason = voting_closed()  # reason is None once voting has closed
-    if not result["reconciliation"]["ok"]:
-        reason = "reconciliation failed"
+    try:
+        result = run_tally()
+    except VotingStillOpen as e:
+        audit.record("tally_refused_voting_open", g.user.id, reason=str(e))
+        abort(409, description=f"Counting starts after polls close: {e}")
+    # SR-18/SR-19: after polls close, a failed reconciliation still shows the
+    # officer the numbers to investigate, but nothing is signed or published
+    reason = None if result["reconciliation"]["ok"] else "reconciliation failed"
     if reason:
         result["signed_package"] = None
         result["publication_blocked"] = reason

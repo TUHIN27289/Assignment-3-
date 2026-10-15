@@ -208,30 +208,50 @@ def _tally_with(app, client, **settings):
         vote(app, app.test_client(), e)
     app.config.update(settings)
     c = login(client, "tally@test.local", "pw-tally")
-    return client.post("/api/tally/run", headers={"X-CSRF-Token": c}).get_json()
+    return client.post("/api/tally/run", headers={"X-CSRF-Token": c})
 
 
-def test_no_publication_while_voting_is_open(app, client):
+def _no_decryption(app, monkeypatch):
+    def fail():
+        raise AssertionError("a ballot was decrypted while voting was open")
+    monkeypatch.setattr(app.extensions["keys"], "ballot_private_key", fail)
+
+
+def test_nothing_counted_while_voting_is_open(app, client, monkeypatch):
     from datetime import datetime, timedelta, timezone
+    from app.models import AuditEvent
+    _no_decryption(app, monkeypatch)
     later = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
     r = _tally_with(app, client, ELECTION_CLOSES_AT=later)
-    assert r["signed_package"] is None and "still open" in r["publication_blocked"]
-    assert r["counted"] == 1  # officer can still check the numbers
+    assert r.status_code == 409 and "still open" in r.get_json()["message"]
+    assert "first_preferences" not in r.get_json()  # no early numbers, not even for the officer
     assert app.test_client().get("/api/results/latest").status_code == 404
+    with app.app_context():
+        assert AuditEvent.query.filter_by(event="tally_refused_voting_open").count() == 1
 
 
-def test_publication_allowed_after_close(app, client):
+def test_reconciliation_still_available_while_voting_is_open(app, client):
+    from datetime import datetime, timedelta, timezone
+    later = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    _tally_with(app, client, ELECTION_CLOSES_AT=later)
+    t = login(client, "tally@test.local", "pw-tally")
+    assert client.post("/api/tally/reconcile", headers={"X-CSRF-Token": t}).get_json()["ok"] is True
+
+
+def test_counted_and_published_after_close(app, client):
     from datetime import datetime, timedelta, timezone
     earlier = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-    r = _tally_with(app, client, ELECTION_CLOSES_AT=earlier)
-    assert r["signed_package"] is not None
+    r = _tally_with(app, client, ELECTION_CLOSES_AT=earlier).get_json()
+    assert r["counted"] == 1 and r["signed_package"] is not None
 
 
-def test_production_needs_a_close_time(app, client):
+def test_production_needs_a_close_time(app, client, monkeypatch):
+    _no_decryption(app, monkeypatch)
     r = _tally_with(app, client, APP_ENV="production", ELECTION_CLOSES_AT=None)
-    assert r["signed_package"] is None and "ELECTION_CLOSES_AT" in r["publication_blocked"]
+    assert r.status_code == 409 and "ELECTION_CLOSES_AT" in r.get_json()["message"]
 
 
-def test_invalid_close_time_blocks_publication(app, client):
+def test_invalid_close_time_refuses_to_count(app, client, monkeypatch):
+    _no_decryption(app, monkeypatch)
     r = _tally_with(app, client, ELECTION_CLOSES_AT="next tuesday")
-    assert r["signed_package"] is None and "not a valid" in r["publication_blocked"]
+    assert r.status_code == 409 and "not a valid" in r.get_json()["message"]
