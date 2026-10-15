@@ -119,3 +119,17 @@ def test_wrong_password_does_not_unlock_sensitive_change(app, client):
     assert client.post("/api/auth/reauth", json={"password": "wrong"}, headers=h).status_code == 401
     r = client.put("/api/enrolment/me/address", json={"address": ADDRESS}, headers=h)
     assert r.status_code == 401 and r.get_json()["message"] == "reauth_required"
+
+
+def test_wrong_reauth_passwords_lock_the_account(app, client):
+    """SR-03 and SR-06: guessing the password through /reauth counts towards the lockout."""
+    from app.auth import MAX_FAILED_LOGINS
+    from .conftest import csrf
+    c = login(client, "voter1@test.local", "pw-voter")
+    h = {"X-CSRF-Token": c}
+    for _ in range(MAX_FAILED_LOGINS):
+        assert client.post("/api/auth/reauth", json={"password": "wrong"}, headers=h).status_code == 401
+    assert client.get("/api/auth/me").status_code == 401  # every session was ended
+    r = client.post("/api/auth/login", json={"email": "voter1@test.local", "password": "pw-voter"},
+                    headers={"X-CSRF-Token": csrf(client)})
+    assert r.status_code == 401  # locked, even with the right password

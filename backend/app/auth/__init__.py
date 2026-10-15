@@ -183,17 +183,24 @@ def logout_all():
 @permission_required("self:read")
 @limiter.limit("5 per minute")
 def reauth():
-    """SR-06: confirm the password again before a sensitive change."""
+    """SR-06: confirm the password again before a sensitive change.
+
+    Wrong passwords here count towards the same lockout as the login page
+    (SR-03), so a hijacked session cannot be used to guess the password."""
     password = str((request.get_json(silent=True) or {}).get("password", ""))
-    try:
-        ok = ph.verify(g.user.password_hash, password)
-    except VerificationError:
-        ok = False
-    if not ok:
-        audit.record("reauth_failed", g.user.id)
+    user = g.user
+    if user.locked_until and user.locked_until > _now():
+        _verify(user.password_hash, password)  # same work as a real check
+        audit.record("reauth_failed", user.id, reason="account locked")
+        abort(401, description="password incorrect")
+    if not _verify(user.password_hash, password):
+        register_failed_attempt(user, "wrong password on re-authentication")
+        if user.locked_until and user.locked_until > _now():
+            sessions.revoke_all(user.id)  # locked out: end every session
+            session.clear()
         abort(401, description="password incorrect")
     sessions.confirm_password_now()
-    audit.record("reauth_ok", g.user.id)
+    audit.record("reauth_ok", user.id)
     return jsonify(ok=True)
 
 
