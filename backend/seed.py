@@ -1,8 +1,12 @@
 """Demo data for local development. These accounts are test values only."""
-from app import create_app
-from app.auth import hash_password
-from app.extensions import db
-from app.models import Candidate, User, Voter
+import os
+
+os.environ.setdefault("APP_ENV", "development")  # demo data is never for production
+
+from app import create_app  # noqa: E402  (APP_ENV must be set before the config loads)
+from app.auth import hash_password  # noqa: E402
+from app.extensions import db  # noqa: E402
+from app.models import Candidate, User, Voter  # noqa: E402
 
 DEMO_PASSWORD = "Demo-Only-2026!"
 

@@ -14,7 +14,8 @@ SR-20 rules enforced here:
   - one key per purpose, never reused across purposes
   - no key material in the source tree (a test scans the repo for it)
   - private keys encrypted at rest when KEY_PASSPHRASE is set. The passphrase
-    is required when APP_ENV=production, so keys are never in the clear there
+    is required in production, which is the default unless APP_ENV says
+    development or test, so keys are never in the clear there
   - the 256-bit secrets (audit, MFA, integrity) are encrypted at rest too,
     with AES-256-GCM under a key derived from the passphrase (scrypt). The
     file name is bound in as associated data, so a secret copied into the
@@ -53,10 +54,12 @@ class KeyEncryptionError(RuntimeError):
 
 def require_passphrase(app_env, passphrase):
     """Production must never run with keys stored in the clear."""
-    if app_env != "production":
+    from .config import is_production
+    if not is_production(app_env):
         return
     if not passphrase:
-        raise KeyEncryptionError("KEY_PASSPHRASE must be set when APP_ENV=production")
+        raise KeyEncryptionError("KEY_PASSPHRASE must be set in production "
+                                 "(for local development set APP_ENV=development)")
     if len(passphrase) < MIN_PASSPHRASE_LENGTH:
         raise KeyEncryptionError(f"KEY_PASSPHRASE must be at least {MIN_PASSPHRASE_LENGTH} characters")
 

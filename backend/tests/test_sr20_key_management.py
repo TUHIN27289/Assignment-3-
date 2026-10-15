@@ -250,3 +250,27 @@ def test_crash_during_rotation_leaves_keys_usable(tmp_path, monkeypatch):
     assert set(k.public_keys("results")) == {old_kid}       # no broken public key listing
     new_kid = k.rotate("results")                           # and rotation recovers cleanly
     assert set(k.public_keys("results")) == {old_kid, new_kid}
+
+
+@pytest.mark.parametrize("env,prod", [(None, True), ("production", True), ("prod", True), ("staging", True),
+                                      ("development", False), ("test", False)])
+def test_anything_but_dev_or_test_counts_as_production(env, prod):
+    from app.config import is_production
+    assert is_production(env) is prod
+
+
+def test_typo_in_app_env_still_needs_passphrase(tmp_path):
+    with pytest.raises(KeyEncryptionError, match="must be set"):
+        create_app(_cfg(tmp_path, APP_ENV="prod", KEY_PASSPHRASE=None))
+
+
+def test_default_app_env_is_production():
+    import importlib
+    import app.config as config_module
+    old = os.environ.pop("APP_ENV", None)
+    try:
+        assert importlib.reload(config_module).Config.APP_ENV == "production"
+    finally:
+        if old is not None:
+            os.environ["APP_ENV"] = old
+        importlib.reload(config_module)

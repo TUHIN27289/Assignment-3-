@@ -34,6 +34,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from flask import Blueprint, abort, current_app, jsonify, request
 
+from .config import is_production
 from .extensions import db, limiter
 from .models import ResultsPackage
 from .security.rbac import public
@@ -60,7 +61,7 @@ def voting_closed():
     refused in production and allowed elsewhere (development and tests)."""
     closes_at = current_app.config.get("ELECTION_CLOSES_AT")
     if not closes_at:
-        if current_app.config.get("APP_ENV") == "production":
+        if is_production(current_app.config.get("APP_ENV")):
             return False, "ELECTION_CLOSES_AT is not set, so voting can't be confirmed closed"
         return True, None
     try:
