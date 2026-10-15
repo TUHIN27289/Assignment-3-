@@ -168,3 +168,18 @@ def test_offline_verifier_rejects_untrusted_key(app, client, tmp_path):
     keys = verifier.load_keys(json.dumps(client.get("/api/keys/public").get_json()))
     valid, message = verifier.verify(forged, keys)
     assert not valid and "does NOT match" in message
+
+
+def test_verify_refuses_oversized_body(app, client):
+    big = {"package": {"padding": "x" * (300 * 1024)}, "kid": "0" * 16, "signature": "x"}
+    c = app.test_client()
+    r = c.post("/api/results/verify", json=big, headers={"X-CSRF-Token": csrf(c)})
+    assert r.status_code == 413
+
+
+def test_verify_is_rate_limited(app, client):
+    c = app.test_client()
+    body = {"package": {}, "kid": "0" * 16, "signature": "x"}
+    codes = [c.post("/api/results/verify", json=body, headers={"X-CSRF-Token": csrf(c)}).status_code
+             for _ in range(31)]
+    assert codes[:30] == [200] * 30 and codes[30] == 429

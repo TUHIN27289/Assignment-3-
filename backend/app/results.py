@@ -17,7 +17,9 @@ network in between:
   - every candidate still in the count is listed, 0 votes included, and
     excluded candidates are listed separately
 
-Anyone can fetch and verify packages. Only the tally creates them.
+Anyone can fetch and verify packages. Only the tally creates them. The
+public verify endpoint is rate limited per IP and refuses oversized bodies,
+so it can't be used to flood the server with expensive signature checks.
 """
 import base64
 import hashlib
@@ -28,11 +30,13 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from flask import Blueprint, abort, current_app, jsonify, request
 
-from .extensions import db
+from .extensions import db, limiter
 from .models import ResultsPackage
 from .security.rbac import public
 
 bp = Blueprint("results", __name__, url_prefix="/api/results")
+
+MAX_VERIFY_BYTES = 256 * 1024  # a real package for every division is well under this
 
 
 def _canonical(payload):
@@ -109,7 +113,10 @@ def by_sequence(seq):
 
 @bp.post("/verify")
 @public
+@limiter.limit("30 per minute")
 def verify():
+    if request.content_length is None or request.content_length > MAX_VERIFY_BYTES:
+        abort(413, description=f"package must be sent with a size of at most {MAX_VERIFY_BYTES} bytes")
     data = request.get_json(silent=True) or {}
     payload, kid, sig = data.get("package"), data.get("kid"), data.get("signature")
     if not isinstance(payload, dict) or not isinstance(kid, str) or not isinstance(sig, str) or len(sig) > 200:
