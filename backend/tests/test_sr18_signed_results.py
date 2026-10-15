@@ -201,3 +201,37 @@ def test_totals_plus_exhausted_add_up_to_ballots_counted(app, client):
     votes = sum(n for counts in pkg["divisions"].values() for n in counts.values())
     assert pkg["exhausted_ballots"] == 2
     assert votes + pkg["exhausted_ballots"] == pkg["ballots_counted"] == 2
+
+
+def _tally_with(app, client, **settings):
+    for e in ("voter1@test.local",):
+        vote(app, app.test_client(), e)
+    app.config.update(settings)
+    c = login(client, "tally@test.local", "pw-tally")
+    return client.post("/api/tally/run", headers={"X-CSRF-Token": c}).get_json()
+
+
+def test_no_publication_while_voting_is_open(app, client):
+    from datetime import datetime, timedelta, timezone
+    later = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    r = _tally_with(app, client, ELECTION_CLOSES_AT=later)
+    assert r["signed_package"] is None and "still open" in r["publication_blocked"]
+    assert r["counted"] == 1  # officer can still check the numbers
+    assert app.test_client().get("/api/results/latest").status_code == 404
+
+
+def test_publication_allowed_after_close(app, client):
+    from datetime import datetime, timedelta, timezone
+    earlier = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    r = _tally_with(app, client, ELECTION_CLOSES_AT=earlier)
+    assert r["signed_package"] is not None
+
+
+def test_production_needs_a_close_time(app, client):
+    r = _tally_with(app, client, APP_ENV="production", ELECTION_CLOSES_AT=None)
+    assert r["signed_package"] is None and "ELECTION_CLOSES_AT" in r["publication_blocked"]
+
+
+def test_invalid_close_time_blocks_publication(app, client):
+    r = _tally_with(app, client, ELECTION_CLOSES_AT="next tuesday")
+    assert r["signed_package"] is None and "not a valid" in r["publication_blocked"]

@@ -58,8 +58,8 @@ export default function Tally({ onSessionLost }) {
             )
             : (
               <div className="alert">
-                <strong>Results not published.</strong> Reconciliation failed, so nothing was signed.
-                These numbers are for investigation only.
+                <strong>Results not published:</strong> {result.publication_blocked}. Nothing was signed,
+                so these numbers are for checking only.
               </div>
             )}
           {Object.entries(result.first_preferences).map(([division, counts]) => (

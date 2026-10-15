@@ -11,6 +11,8 @@ network in between:
     a key rotation
   - generated_at timestamp and a sequence number inside the signed data,
     so an old package can't be passed off as the latest recount
+  - nothing is signed before voting has closed (ELECTION_CLOSES_AT), so no
+    partial count can be published as a result while people are still voting
   - nothing is signed if reconciliation failed (SR-19): the AEC doesn't vouch
     for numbers that don't add up. The reconciliation result is also signed
     into the package, so this can be checked by anyone
@@ -49,10 +51,36 @@ class ReconciliationFailed(RuntimeError):
     pass
 
 
+class VotingStillOpen(RuntimeError):
+    pass
+
+
+def voting_closed():
+    """Returns (closed, reason). Without a configured close time, publishing is
+    refused in production and allowed elsewhere (development and tests)."""
+    closes_at = current_app.config.get("ELECTION_CLOSES_AT")
+    if not closes_at:
+        if current_app.config.get("APP_ENV") == "production":
+            return False, "ELECTION_CLOSES_AT is not set, so voting can't be confirmed closed"
+        return True, None
+    try:
+        when = datetime.fromisoformat(str(closes_at))
+    except ValueError:
+        return False, f"ELECTION_CLOSES_AT is not a valid date and time: {closes_at}"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) < when:
+        return False, f"voting is still open until {when.isoformat()}"
+    return True, None
+
+
 def create_package(tally_result):
     """Build, sign and store a results package from a run_tally() result."""
     if not tally_result["reconciliation"]["ok"]:
         raise ReconciliationFailed("results are not signed while reconciliation fails")
+    closed, reason = voting_closed()
+    if not closed:
+        raise VotingStillOpen(reason)
     last = db.session.query(db.func.max(ResultsPackage.seq)).scalar() or 0
     payload = {
         "v": 1,

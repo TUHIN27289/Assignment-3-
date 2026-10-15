@@ -18,7 +18,7 @@ from ..ballot.crypto import (GENESIS_MAC, EncryptedBallot, ballot_digest,
                              chain_mac, decrypt_ballot)
 from ..extensions import db
 from ..models import Candidate, CastBallot, ChainHead, IntegrityAlert
-from ..results import create_package
+from ..results import create_package, voting_closed
 from .reconcile import reconcile
 
 bp = Blueprint("tally", __name__, url_prefix="/api/tally")
@@ -101,11 +101,15 @@ def run_tally():
 @permission_required("tally:run")
 def run():
     result = run_tally()
+    # SR-18/SR-19: the officer can still see the numbers to investigate, but
+    # nothing is signed or published until voting has closed and the records agree
+    _, reason = voting_closed()  # reason is None once voting has closed
     if not result["reconciliation"]["ok"]:
-        # SR-18/SR-19: the officer can still see the numbers to investigate,
-        # but nothing is signed or published until the records agree
+        reason = "reconciliation failed"
+    if reason:
         result["signed_package"] = None
-        audit.record("results_publication_blocked", g.user.id, counted=result["counted"],
+        result["publication_blocked"] = reason
+        audit.record("results_publication_blocked", g.user.id, counted=result["counted"], reason=reason,
                      problems=result["reconciliation"]["problems"])
         return jsonify(result)
     result["signed_package"] = create_package(result)  # SR-18
