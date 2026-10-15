@@ -22,6 +22,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     # voter | enrolment_officer | delegate | tally_officer | auditor
     role = db.Column(db.String(32), nullable=False)
+    state = db.Column(db.String(3))  # delegates only: the state they act for (SR-17)
     # SR-03 lockout
     failed_logins = db.Column(db.Integer, nullable=False, default=0)
     locked_until = db.Column(db.DateTime)
@@ -51,7 +52,36 @@ class Candidate(db.Model):
     name = db.Column(db.String(255), nullable=False)
     party = db.Column(db.String(128))
     division = db.Column(db.String(64), nullable=False)
+    state = db.Column(db.String(3), nullable=False, default="VIC")
     ballot_order = db.Column(db.Integer, nullable=False)
+    # SR-17: set only through an approved exclusion (court-ordered recount)
+    excluded = db.Column(db.Boolean, nullable=False, default=False)
+    exclusion_reason = db.Column(db.String(500))
+
+
+class PendingChange(db.Model):
+    """SR-17: a candidate change waiting for a second delegate."""
+    __tablename__ = "pending_changes"
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(16), nullable=False)  # create | update | exclude
+    candidate_id = db.Column(db.Integer, db.ForeignKey("candidates.id"))
+    state = db.Column(db.String(3), nullable=False)
+    payload = db.Column(db.Text, nullable=False)  # JSON of the requested values
+    reason = db.Column(db.String(500), nullable=False)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    requested_at = db.Column(db.DateTime, nullable=False)
+    status = db.Column(db.String(16), nullable=False, default="pending")  # pending|applied|rejected|withdrawn|expired
+    decided_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    decided_at = db.Column(db.DateTime)
+
+
+class ResultsPackage(db.Model):
+    """SR-18: a signed, published results package. Aggregates only."""
+    __tablename__ = "results_packages"
+    seq = db.Column(db.Integer, primary_key=True)
+    payload = db.Column(db.Text, nullable=False)  # canonical JSON that was signed
+    kid = db.Column(db.String(16), nullable=False)
+    signature = db.Column(db.String(128), nullable=False)
 
 
 # ---------- ballot database ----------

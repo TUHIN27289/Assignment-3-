@@ -44,7 +44,7 @@ body { margin: 0; background: var(--bg); }
 h1 { font-size: 22px; margin: 0 0 12px; }
 
 label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
-input {
+input, select {
   font: inherit; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); color: var(--text);
 }
