@@ -1,4 +1,4 @@
 # SR-08: tools used by CI only, pinned like the runtime dependencies
 bandit==1.9.4
 pip-audit==2.10.1
-cyclonedx-bom==7.4.0
+cyclonedx-bom==7.5.0
