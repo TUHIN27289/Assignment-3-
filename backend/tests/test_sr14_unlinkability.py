@@ -56,7 +56,9 @@ def test_voter_record_keeps_flag_but_no_time(app, client):
     vote(app, client, "voter1@test.local")
     with app.app_context():
         assert Voter.query.first().ballot_issued is True
-        assert not any("time" in c or "date" in c for c in Voter.__table__.columns.keys())
+        # no "voted at" / "issued at" style column (date_of_birth is enrolment data, not voting)
+        cols = [c for c in Voter.__table__.columns.keys() if c != "date_of_birth"]
+        assert not any("time" in c or "date" in c or c.endswith("_at") for c in cols)
 
 
 def test_forged_token_rejected(app, client):

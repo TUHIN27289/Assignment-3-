@@ -1,0 +1,60 @@
+# SR-08: release integrity. Runs when a version tag (v*) is pushed.
+# Builds the frontend, packages the backend source, attaches SBOMs and
+# SHA-256 checksums, and creates a signed build provenance attestation so
+# anyone can check an artifact really came from this repo's pipeline:
+#   gh attestation verify <file> --repo <owner>/<repo>
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write       # for the provenance signature (Sigstore)
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Test before packaging
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          python -m pytest -q
+          cyclonedx-py requirements requirements.txt -o ../sbom-backend.json
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.1 --output-file ../sbom-frontend.json
+      - name: Package and checksum
+        run: |
+          tar -czf frontend-dist.tar.gz -C frontend dist
+          git archive --format=tar.gz -o backend-src.tar.gz HEAD backend
+          sha256sum frontend-dist.tar.gz backend-src.tar.gz sbom-*.json > SHA256SUMS
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            frontend-dist.tar.gz
+            backend-src.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ github.ref_name }}
+          path: |
+            frontend-dist.tar.gz
+            backend-src.tar.gz
+            sbom-*.json
+            SHA256SUMS

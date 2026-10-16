@@ -11,6 +11,7 @@ address. That is the core of SR-14.
 from sqlalchemy import DDL, event
 
 from .extensions import db
+from .security.pii import EncryptedText
 
 
 # ---------- identity database ----------
@@ -31,11 +32,40 @@ class User(db.Model):
     mfa_last_step = db.Column(db.Integer)  # last accepted 30 s step, blocks code replay
 
 
+class UserSession(db.Model):
+    """SR-06: server-side record of a login session."""
+    __tablename__ = "user_sessions"
+    sid_hash = db.Column(db.String(64), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False)
+    last_seen = db.Column(db.DateTime, nullable=False)
+    auth_at = db.Column(db.DateTime, nullable=False)  # last time the password was entered
+    revoked = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class ExportRequest(db.Model):
+    """SR-07: a request to export elector records."""
+    __tablename__ = "export_requests"
+    id = db.Column(db.Integer, primary_key=True)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    division = db.Column(db.String(64))  # None = whole roll
+    record_count = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.String(500), nullable=False)
+    requested_at = db.Column(db.DateTime, nullable=False)
+    status = db.Column(db.String(16), nullable=False)  # pending|approved|rejected|expired|downloaded
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    decided_at = db.Column(db.DateTime)
+    downloaded_at = db.Column(db.DateTime)
+
+
 class Voter(db.Model):
     __tablename__ = "voters"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
-    full_name = db.Column(db.String(255), nullable=False)
+    # SR-05: personal details encrypted at rest
+    full_name = db.Column(EncryptedText("voters.full_name"), nullable=False)
+    date_of_birth = db.Column(EncryptedText("voters.date_of_birth"))
+    address = db.Column(EncryptedText("voters.address"))
     division = db.Column(db.String(64), nullable=False)
     enrolled = db.Column(db.Boolean, nullable=False, default=False)
     # Only a flag, no time. A "voted at" timestamp could be lined up with the

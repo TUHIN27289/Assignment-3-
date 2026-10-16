@@ -28,6 +28,7 @@ from ..extensions import db, limiter
 from ..models import User
 from ..security.http import get_csrf_token
 from ..security.rbac import has_permission, public
+from . import sessions  # noqa: E402  (SR-06)
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 # Argon2id, parameters as recommended by RFC 9106 (low-memory option)
@@ -71,8 +72,7 @@ def _now():
 
 
 def current_user():
-    uid = session.get("uid")
-    return db.session.get(User, uid) if uid else None
+    return sessions.current_session_user()
 
 
 def login_required(view):
@@ -147,9 +147,9 @@ def login():
 
 
 def start_session(user):
-    session.clear()  # new session on login, stops session fixation
-    session["uid"] = user.id
-    session.permanent = True
+    """SR-06: create the server-side session (see sessions.py). Kept under this
+    name so the MFA login in mfa.py gets it too."""
+    sessions.start(user)
 
 
 def register_failed_attempt(user, reason):
@@ -166,7 +166,41 @@ def register_failed_attempt(user, reason):
 @bp.post("/logout")
 @public
 def logout():
+    sessions.end()
+    return jsonify(ok=True)
+
+
+@bp.post("/logout-all")
+@permission_required("self:read")
+def logout_all():
+    n = sessions.revoke_all(g.user.id)
     session.clear()
+    audit.record("sessions_revoked_all", g.user.id, sessions=n)
+    return jsonify(ok=True, ended=n)
+
+
+@bp.post("/reauth")
+@permission_required("self:read")
+@limiter.limit("5 per minute")
+def reauth():
+    """SR-06: confirm the password again before a sensitive change.
+
+    Wrong passwords here count towards the same lockout as the login page
+    (SR-03), so a hijacked session cannot be used to guess the password."""
+    password = str((request.get_json(silent=True) or {}).get("password", ""))
+    user = g.user
+    if user.locked_until and user.locked_until > _now():
+        _verify(user.password_hash, password)  # same work as a real check
+        audit.record("reauth_failed", user.id, reason="account locked")
+        abort(401, description="password incorrect")
+    if not _verify(user.password_hash, password):
+        register_failed_attempt(user, "wrong password on re-authentication")
+        if user.locked_until and user.locked_until > _now():
+            sessions.revoke_all(user.id)  # locked out: end every session
+            session.clear()
+        abort(401, description="password incorrect")
+    sessions.confirm_password_now()
+    audit.record("reauth_ok", user.id)
     return jsonify(ok=True)
 
 

@@ -26,6 +26,12 @@ class Config:
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = "Strict"
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=15)
+    # SR-06, enforced server-side in auth/sessions.py
+    SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
+    SESSION_ABSOLUTE_TIMEOUT = timedelta(hours=8)
+    REAUTH_WINDOW = timedelta(minutes=5)
+    # SR-07: exports bigger than this need a second officer's approval
+    EXPORT_APPROVAL_THRESHOLD = 500
 
     FORCE_HTTPS = True
     RATELIMIT_STORAGE_URI = "memory://"
@@ -33,7 +39,8 @@ class Config:
 
 class TestConfig(Config):
     TESTING = True
-    SECRET_KEY = "test-secret"
+    # unit tests only (SR-08: marked for Bandit)
+    SECRET_KEY = "test-secret"  # nosec B105
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_BINDS = {"ballots": "sqlite://", "audit": "sqlite://"}
     FORCE_HTTPS = False
