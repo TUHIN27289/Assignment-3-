@@ -24,8 +24,9 @@ from ..auth import permission_required
 from ..security.rbac import public
 from ..extensions import db
 from ..models import BallotToken, Candidate, CastBallot, ChainHead, Voter
-from .crypto import GENESIS_MAC, ballot_digest, chain_mac, encrypt_ballot
+from .crypto import GENESIS_MAC, ballot_digest, chain_mac, encrypt_ballot, sign_receipt, verify_receipt
 from .validation import InvalidBallot, validate_ballot
+from ..ip_validator import DiplomaticIPValidator
 
 bp = Blueprint("ballot", __name__, url_prefix="/api/ballot")
 
@@ -48,6 +49,12 @@ def candidates():
 @bp.post("/token")
 @permission_required("ballot:vote")
 def issue_token():
+    if request.headers.get("X-Overseas-Voting") == "true" or request.args.get("overseas") == "true":
+        ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+        client_ip = DiplomaticIPValidator.extract_client_ip(request)
+        if not DiplomaticIPValidator.is_ip_allowed(client_ip, ranges):
+            abort(403, description="access restricted to authorized diplomatic mission networks")
+
     voter = Voter.query.filter_by(user_id=g.user.id).first()
     if voter is None or not voter.enrolled:
         abort(403, description="not enrolled")
@@ -69,6 +76,16 @@ def issue_token():
     # lined up with the order of ballots in the chain (SR-14). The voter's
     # ballot_issued flag is the record that a ballot was issued.
     return jsonify(ballot_token=token, division=voter.division)
+
+
+@bp.post("/overseas/token")
+@permission_required("ballot:vote")
+def issue_overseas_token():
+    ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+    client_ip = DiplomaticIPValidator.extract_client_ip(request)
+    if not DiplomaticIPValidator.is_ip_allowed(client_ip, ranges):
+        abort(403, description="access restricted to authorized diplomatic mission networks")
+    return issue_token()
 
 
 def append_ballot(ballot, division):
@@ -99,6 +116,12 @@ def append_ballot(ballot, division):
 @bp.post("/cast")
 @public  # anonymous on purpose (SR-14), the one-time token is the credential
 def cast():
+    if request.headers.get("X-Overseas-Voting") == "true" or request.args.get("overseas") == "true":
+        ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+        client_ip = DiplomaticIPValidator.extract_client_ip(request)
+        if not DiplomaticIPValidator.is_ip_allowed(client_ip, ranges):
+            abort(403, description="access restricted to authorized diplomatic mission networks")
+
     data = request.get_json(silent=True) or {}
     token = data.get("ballot_token")
     if not isinstance(token, str) or not 20 <= len(token) <= 100:
@@ -126,5 +149,20 @@ def cast():
 
     digest = append_ballot(ballot, division)
     db.session.commit()
-    # The digest doubles as the voter's tracking code (hook for SR-10 receipt)
-    return jsonify(tracking_code=digest)
+    # SR-10: signed voter receipt with tracking code
+    keys = current_app.extensions["keys"]
+    receipt_sig = sign_receipt(keys.receipt_key(), digest)
+    return jsonify(tracking_code=digest, receipt=receipt_sig, signature=receipt_sig)
+
+
+@bp.post("/receipt/verify")
+@public
+def verify_receipt_endpoint():
+    data = request.get_json(silent=True) or {}
+    tracking_code = data.get("tracking_code")
+    signature = data.get("signature") or data.get("receipt")
+    if not tracking_code or not signature:
+        abort(400, description="missing tracking_code or signature")
+    keys = current_app.extensions["keys"]
+    valid = verify_receipt(keys.receipt_key(), tracking_code, signature)
+    return jsonify(valid=valid, tracking_code=tracking_code)
