@@ -26,6 +26,7 @@ class KeyService:
         self._ensure_secret("pii.key")
         self._ensure_secret("audit.key")
         self._ensure_secret("mfa.key")
+        self._ensure_secret("receipt.key")
 
     def _path(self, name):
         return os.path.join(self.key_dir, name)
@@ -82,3 +83,8 @@ class KeyService:
     def integrity_key(self):
         with open(self._path("ballot_integrity.key"), "rb") as f:
             return f.read()
+
+    def receipt_key(self):
+        with open(self._path("receipt.key"), "rb") as f:
+            return f.read()
+
