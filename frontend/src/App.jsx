@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
-import { getMe, logout } from './api'
+import { getMe, logout, onReauthNeeded } from './api'
 import Audit from './pages/Audit'
 import Delegate from './pages/Delegate'
+import Enrolment from './pages/Enrolment'
 import Login from './pages/Login'
+import MyEnrolment from './pages/MyEnrolment'
+import ReauthDialog from './pages/ReauthDialog'
 import ReconciliationCheck from './pages/Reconciliation'
 import Receipt from './pages/Receipt'
 import Results from './pages/Results'
@@ -22,8 +25,11 @@ export default function App() {
   const [receipt, setReceipt] = useState(null)
   const [showResults, setShowResults] = useState(false)
 
+  const [reauth, setReauth] = useState(null) // resolver while the password dialog is open
+
   useEffect(() => {
     getMe().then(setUser).catch(() => setUser(null))
+    onReauthNeeded(() => new Promise((resolve) => setReauth(() => resolve)))
   }, [])
 
   async function handleLogout() {
@@ -57,16 +63,21 @@ export default function App() {
         {!showResults && receipt && <Receipt trackingCode={receipt} onFinish={() => setReceipt(null)} />}
         {!user && !receipt && !showResults && <Login onLogin={() => getMe().then(setUser)} />}
         {user?.role === 'voter' && (
-          <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
+          <>
+            <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
+            <MyEnrolment onSessionLost={onSessionLost} />
+          </>
         )}
         {user?.role === 'tally_officer' && <Tally onSessionLost={onSessionLost} />}
+        {user?.role === 'enrolment_officer' && <Enrolment onSessionLost={onSessionLost} />}
         {user?.role === 'auditor' && <Audit onSessionLost={onSessionLost} />}
         {user?.role === 'auditor' && <ReconciliationCheck onSessionLost={onSessionLost} />}
         {user?.role === 'delegate' && <Delegate onSessionLost={onSessionLost} />}
-        {user && !['voter', 'tally_officer', 'auditor', 'delegate'].includes(user.role) && (
+        {user && !['voter', 'tally_officer', 'enrolment_officer', 'auditor', 'delegate'].includes(user.role) && (
           <p>No screens for this role yet.</p>
         )}
       </main>
+      {reauth && <ReauthDialog onDone={(pw) => { reauth(pw); setReauth(null) }} />}
     </>
   )
 }

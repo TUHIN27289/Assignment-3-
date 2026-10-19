@@ -8,7 +8,8 @@ from app.auth import hash_password  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import Candidate, User, Voter  # noqa: E402
 
-DEMO_PASSWORD = "Demo-Only-2026!"
+# Local demo accounts only, never deployed (SR-08: marked for Bandit)
+DEMO_PASSWORD = "Demo-Only-2026!"  # nosec B105
 
 app = create_app()
 with app.app_context():
@@ -22,12 +23,16 @@ with app.app_context():
         u = User(email=f"voter{n}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role="voter")
         db.session.add(u)
         db.session.flush()
-        db.session.add(Voter(user_id=u.id, full_name=f"Demo Voter {n}", division="Melbourne", enrolled=True))
+        db.session.add(Voter(user_id=u.id, full_name=f"Demo Voter {n}", date_of_birth=f"19{80 + n}-0{n}-1{n}",
+                             address=f"{n} Swanston St, Melbourne VIC 3000", division="Melbourne", enrolled=True))
     for role in ("enrolment_officer", "delegate", "tally_officer", "auditor"):
         db.session.add(User(email=f"{role}@demo.local", password_hash=hash_password(DEMO_PASSWORD), role=role,
                             state="VIC" if role == "delegate" else None))
     # SR-17 needs a second delegate to approve changes
     db.session.add(User(email="delegate2@demo.local", password_hash=hash_password(DEMO_PASSWORD),
                         role="delegate", state="VIC"))
+    # SR-07 needs a second enrolment officer to approve large exports
+    db.session.add(User(email="enrolment_officer2@demo.local", password_hash=hash_password(DEMO_PASSWORD),
+                        role="enrolment_officer"))
     db.session.commit()
     print("seeded demo accounts (see seed.py for the password)")

@@ -4,6 +4,7 @@ Each purpose gets its own key:
   - ballot encryption key pair (RSA-3072). The ballot service only ever
     loads the PUBLIC key. The private key is loaded by the tally only.
   - ballot integrity key (256-bit HMAC key) for the hash chain.
+  - PII key (256-bit AES key) for voter personal data at rest (SR-05).
   - audit key (256-bit HMAC key) for the audit log chain (SR-04).
   - MFA key (256-bit AES key) that encrypts users' TOTP secrets (SR-01).
 
@@ -83,6 +84,7 @@ class KeyService:
                 self.rotate(purpose)
         self._ensure_ballot_keypair()
         self._ensure_integrity_key()
+        self._ensure_secret("pii.key")
         self._ensure_secret("audit.key")
         self._ensure_secret("mfa.key")
 
@@ -143,6 +145,10 @@ class KeyService:
                 raise KeyEncryptionError(f"{name}: wrong passphrase, or the file was changed or swapped") from None
         self._secrets[name] = data
         return data
+
+    def pii_key(self):
+        with open(self._path("pii.key"), "rb") as f:
+            return f.read()
 
     def mfa_key(self):
         return self._read_secret("mfa.key")
