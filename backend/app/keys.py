@@ -17,7 +17,7 @@ SR-20 rules enforced here:
   - private keys encrypted at rest when KEY_PASSPHRASE is set. The passphrase
     is required in production, which is the default unless APP_ENV says
     development or test, so keys are never in the clear there
-  - the 256-bit secrets (audit, MFA, integrity) are encrypted at rest too,
+  - the 256-bit secrets (audit, MFA, PII, integrity) are encrypted at rest too,
     with AES-256-GCM under a key derived from the passphrase (scrypt). The
     file name is bound in as associated data, so a secret copied into the
     wrong file is rejected instead of being used for the wrong purpose
@@ -147,8 +147,7 @@ class KeyService:
         return data
 
     def pii_key(self):
-        with open(self._path("pii.key"), "rb") as f:
-            return f.read()
+        return self._read_secret("pii.key")
 
     def mfa_key(self):
         return self._read_secret("mfa.key")
@@ -198,7 +197,7 @@ class KeyService:
                 continue  # already encrypted
             self._replace_secret(name, self._private_pem(key))
             changed.append(name)
-        for name in ("audit.key", "mfa.key", "ballot_integrity.key"):
+        for name in ("audit.key", "mfa.key", "pii.key", "ballot_integrity.key"):
             with open(self._path(name), "rb") as f:
                 data = f.read()
             if not data.startswith(SECRET_MAGIC):
