@@ -247,10 +247,10 @@ class KeyService:
         return sorted(int(n[5:-4]) for n in os.listdir(d) if n.startswith("pub-v") and n.endswith(".pem"))
 
     @staticmethod
-    def _write_atomic(path, data, mode):
+    def _write_atomic(path, data):
         """Write to a temp file and rename it into place, so a crash never leaves a half-written key."""
         tmp = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         os.replace(tmp, path)
@@ -268,9 +268,9 @@ class KeyService:
         d = self._signing_dir(purpose)
         version = (self._versions(purpose) or [0])[-1] + 1
         key = ed25519.Ed25519PrivateKey.generate()
-        self._write_atomic(os.path.join(d, f"v{version}.pem"), self._private_pem(key), 0o600)
+        self._write_atomic(os.path.join(d, f"v{version}.pem"), self._private_pem(key))
         self._write_atomic(os.path.join(d, f"pub-v{version}.pem"), key.public_key().public_bytes(
-            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo), 0o644)
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
         for name in os.listdir(d):
             if name.startswith("v") and name.endswith(".pem") and name != f"v{version}.pem":
                 os.remove(os.path.join(d, name))
