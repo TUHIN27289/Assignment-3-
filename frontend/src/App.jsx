@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { getMe, logout, onReauthNeeded } from './api'
 import Audit from './pages/Audit'
+import Delegate from './pages/Delegate'
 import Enrolment from './pages/Enrolment'
 import Login from './pages/Login'
 import MyEnrolment from './pages/MyEnrolment'
 import ReauthDialog from './pages/ReauthDialog'
+import ReconciliationCheck from './pages/Reconciliation'
 import Receipt from './pages/Receipt'
+import Results from './pages/Results'
 import Tally from './pages/Tally'
 import Vote from './pages/Vote'
 
@@ -20,6 +23,7 @@ const ROLE_LABELS = {
 export default function App() {
   const [user, setUser] = useState(undefined) // undefined = still checking
   const [receipt, setReceipt] = useState(null)
+  const [showResults, setShowResults] = useState(false)
 
   const [reauth, setReauth] = useState(null) // resolver while the password dialog is open
 
@@ -42,6 +46,11 @@ export default function App() {
     <>
       <header className="topbar">
         <span className="brand">Electronic Voting Platform</span>
+        {!user && (
+          <button className="link" onClick={() => setShowResults(!showResults)}>
+            {showResults ? 'Back' : 'Results'}
+          </button>
+        )}
         {user && (
           <span className="who">
             {user.email} · {ROLE_LABELS[user.role] || user.role}
@@ -50,8 +59,9 @@ export default function App() {
         )}
       </header>
       <main className="page">
-        {receipt && <Receipt trackingCode={receipt} onFinish={() => setReceipt(null)} />}
-        {!user && !receipt && <Login onLogin={() => getMe().then(setUser)} />}
+        {!user && showResults && <Results />}
+        {!showResults && receipt && <Receipt trackingCode={receipt} onFinish={() => setReceipt(null)} />}
+        {!user && !receipt && !showResults && <Login onLogin={() => getMe().then(setUser)} />}
         {user?.role === 'voter' && (
           <>
             <Vote onSessionLost={onSessionLost} onCast={(code) => { setUser(null); setReceipt(code) }} />
@@ -61,7 +71,9 @@ export default function App() {
         {user?.role === 'tally_officer' && <Tally onSessionLost={onSessionLost} />}
         {user?.role === 'enrolment_officer' && <Enrolment onSessionLost={onSessionLost} />}
         {user?.role === 'auditor' && <Audit onSessionLost={onSessionLost} />}
-        {user && !['voter', 'tally_officer', 'enrolment_officer', 'auditor'].includes(user.role) && (
+        {user?.role === 'auditor' && <ReconciliationCheck onSessionLost={onSessionLost} />}
+        {user?.role === 'delegate' && <Delegate onSessionLost={onSessionLost} />}
+        {user && !['voter', 'tally_officer', 'enrolment_officer', 'auditor', 'delegate'].includes(user.role) && (
           <p>No screens for this role yet.</p>
         )}
       </main>

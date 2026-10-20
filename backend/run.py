@@ -3,8 +3,12 @@ First run: python scripts/make_dev_cert.py
 """
 import os
 
-from app import create_app
-from app.security.tls import tls13_server_context
+# Local dev server: development mode, so it starts without KEY_PASSPHRASE.
+# Production must not use this file (the app defaults to production).
+os.environ.setdefault("APP_ENV", "development")
+
+from app import create_app  # noqa: E402  (APP_ENV must be set before the config loads)
+from app.security.tls import tls13_server_context  # noqa: E402
 
 CERT_DIR = os.path.join(os.path.dirname(__file__), "instance", "certs")
 

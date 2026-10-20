@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { downloadPackage } from '../download'
+import SignatureInfo from './SignatureInfo'
+import ReconciliationCheck, { ReconciliationSummary } from './Reconciliation'
 
 export default function Tally({ onSessionLost }) {
   const [result, setResult] = useState(null)
@@ -20,6 +23,7 @@ export default function Tally({ onSessionLost }) {
   }
 
   return (
+    <>
     <div className="card">
       <h1>Tally</h1>
       <p className="muted">
@@ -30,7 +34,10 @@ export default function Tally({ onSessionLost }) {
       {error && <p className="error" role="alert">{error}</p>}
       {result && (
         <>
+          <ReconciliationSummary result={result.reconciliation} />
           <p><strong>{result.counted}</strong> ballots verified and counted.</p>
+          {result.excluded.length > 0 && <p className="muted">Excluded by court order: {result.excluded.join(', ')}</p>}
+          {result.exhausted > 0 && <p className="muted">{result.exhausted} ballot(s) exhausted: every preference on them was excluded.</p>}
           {result.rejected.length > 0 && (
             <div className="alert">
               <strong>{result.rejected.length} integrity problem(s):</strong>
@@ -41,6 +48,20 @@ export default function Tally({ onSessionLost }) {
               </ul>
             </div>
           )}
+          {result.signed_package
+            ? (
+              <div style={{ marginTop: 12 }}>
+                <strong>Signed results package published.</strong>
+                <SignatureInfo pkg={result.signed_package} />
+                <button className="secondary" onClick={() => downloadPackage(result.signed_package)}>Download signed package</button>
+              </div>
+            )
+            : (
+              <div className="alert">
+                <strong>Results not published:</strong> {result.publication_blocked}. Nothing was signed,
+                so these numbers are for checking only.
+              </div>
+            )}
           {Object.entries(result.first_preferences).map(([division, counts]) => (
             <table key={division} className="results">
               <caption>{division}: first preferences</caption>
@@ -54,5 +75,7 @@ export default function Tally({ onSessionLost }) {
         </>
       )}
     </div>
+    <ReconciliationCheck onSessionLost={onSessionLost} />
+    </>
   )
 }
