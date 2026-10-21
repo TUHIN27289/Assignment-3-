@@ -14,7 +14,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 ON_WINDOWS = os.name == "nt"
 SKIP_ON_WINDOWS = pytest.mark.skipif(ON_WINDOWS, reason="Windows has no Unix permission bits")
 PASSPHRASE = "correct horse battery staple"
-SECRETS = ("audit.key", "mfa.key", "pii.key", "ballot_integrity.key")
+SECRETS = ("audit.key", "mfa.key", "pii.key", "ballot_integrity.key", "receipt.key")
 SKIP_DIRS = {".venv", "node_modules", "instance", ".git", "__pycache__", "dist", "backups", ".pytest_cache"}
 
 
@@ -109,7 +109,7 @@ def test_rotate_cli(app):
 
 def test_secret_keys_encrypted_when_passphrase_set(tmp_path):
     k = KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
-    loaded = {"audit.key": k.audit_key(), "mfa.key": k.mfa_key(), "pii.key": k.pii_key(),"ballot_integrity.key": k.integrity_key()}
+    loaded = {"audit.key": k.audit_key(), "mfa.key": k.mfa_key(), "pii.key": k.pii_key(), "ballot_integrity.key": k.integrity_key(), "receipt.key": k.receipt_key()}
     for name in SECRETS:
         on_disk = (tmp_path / "k" / name).read_bytes()
         assert on_disk.startswith(SECRET_MAGIC)
@@ -149,13 +149,13 @@ def test_plain_secret_refused_once_passphrase_is_set(tmp_path):
 
 def test_encrypt_existing_keys(tmp_path):
     plain = KeyService(str(tmp_path / "k"))
-    before = {"audit": plain.audit_key(), "mfa": plain.mfa_key(), "pii": plain.pii_key(), "integrity": plain.integrity_key()}
+    before = {"audit": plain.audit_key(), "mfa": plain.mfa_key(), "pii": plain.pii_key(), "integrity": plain.integrity_key(), "receipt": plain.receipt_key()}
     k = KeyService(str(tmp_path / "k"), passphrase=PASSPHRASE)
     changed = k.encrypt_at_rest()
     assert set(changed) == {"ballot_private.pem", os.path.join("signing", "results", "v1.pem"), *SECRETS}
     assert b"ENCRYPTED PRIVATE KEY" in (tmp_path / "k" / "ballot_private.pem").read_bytes()
     # same keys afterwards, just protected, so nothing signed or chained before is lost
-    assert {"audit": k.audit_key(), "mfa": k.mfa_key(), "pii": k.pii_key(), "integrity": k.integrity_key()} == before
+    assert {"audit": k.audit_key(), "mfa": k.mfa_key(), "pii": k.pii_key(), "integrity": k.integrity_key(), "receipt": k.receipt_key()} == before
     assert k.ballot_private_key() is not None
     assert k.encrypt_at_rest() == []  # running it again changes nothing
 
@@ -174,7 +174,7 @@ def test_encrypt_cli_is_audited(tmp_path):
         KEY_PASSPHRASE = PASSPHRASE
     app = create_app(Cfg)
     out = app.test_cli_runner().invoke(args=["keys", "encrypt"])
-    assert out.exit_code == 0 and "6 key file(s) encrypted" in out.output
+    assert out.exit_code == 0 and "7 key file(s) encrypted" in out.output
     with app.app_context():
         assert AuditEvent.query.filter_by(event="keys_encrypted_at_rest").count() == 1
 

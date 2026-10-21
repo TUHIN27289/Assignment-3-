@@ -52,6 +52,9 @@ class Config:
     FORCE_HTTPS = True
     RATELIMIT_STORAGE_URI = "memory://"
 
+    # SR-12: Diplomatic mission IP ranges for overseas voting (comma-separated CIDRs)
+    DIPLOMATIC_MISSION_IP_RANGES = os.environ.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+
 
 class TestConfig(Config):
     TESTING = True
@@ -61,3 +64,4 @@ class TestConfig(Config):
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_BINDS = {"ballots": "sqlite://", "audit": "sqlite://"}
     FORCE_HTTPS = False
+    DIPLOMATIC_MISSION_IP_RANGES = ""

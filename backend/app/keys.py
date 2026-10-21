@@ -87,6 +87,7 @@ class KeyService:
         self._ensure_secret("pii.key")
         self._ensure_secret("audit.key")
         self._ensure_secret("mfa.key")
+        self._ensure_secret("receipt.key")
 
     def _path(self, name):
         return os.path.join(self.key_dir, name)
@@ -167,6 +168,9 @@ class KeyService:
     def integrity_key(self):
         return self._read_secret("ballot_integrity.key")
 
+    def receipt_key(self):
+        return self._read_secret("receipt.key")
+
     # ---- SR-20 ----
 
     def _private_pem(self, key):
@@ -197,7 +201,7 @@ class KeyService:
                 continue  # already encrypted
             self._replace_secret(name, self._private_pem(key))
             changed.append(name)
-        for name in ("audit.key", "mfa.key", "pii.key", "ballot_integrity.key"):
+        for name in ("audit.key", "mfa.key", "pii.key", "ballot_integrity.key", "receipt.key"):
             with open(self._path(name), "rb") as f:
                 data = f.read()
             if not data.startswith(SECRET_MAGIC):
