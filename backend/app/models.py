@@ -69,6 +69,8 @@ class Voter(db.Model):
     address = db.Column(EncryptedText("voters.address"))
     division = db.Column(db.String(64), nullable=False)
     enrolled = db.Column(db.Boolean, nullable=False, default=False)
+    # SR-12: Overseas voter flag (for voters registered at diplomatic missions)
+    overseas = db.Column(db.Boolean, nullable=False, default=False)
     # Only a flag, no time. A "voted at" timestamp could be lined up with the
     # order of ballots in the ballot store to re-identify voters.
     ballot_issued = db.Column(db.Boolean, nullable=False, default=False)
@@ -122,6 +124,7 @@ class BallotToken(db.Model):
     __tablename__ = "ballot_tokens"
     token_hash = db.Column(db.String(64), primary_key=True)
     division = db.Column(db.String(64), nullable=False)
+    overseas = db.Column(db.Boolean, nullable=False, default=False)
     used = db.Column(db.Boolean, nullable=False, default=False)
 
 
