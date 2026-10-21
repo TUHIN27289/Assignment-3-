@@ -24,8 +24,9 @@ from ..auth import permission_required
 from ..security.rbac import public
 from ..extensions import db
 from ..models import BallotToken, Candidate, CastBallot, ChainHead, Voter
-from .crypto import GENESIS_MAC, ballot_digest, chain_mac, encrypt_ballot
+from .crypto import GENESIS_MAC, ballot_digest, chain_mac, encrypt_ballot, sign_receipt, verify_receipt
 from .validation import InvalidBallot, validate_ballot
+from ..ip_validator import DiplomaticIPValidator
 
 bp = Blueprint("ballot", __name__, url_prefix="/api/ballot")
 
@@ -52,6 +53,17 @@ def issue_token():
     if voter is None or not voter.enrolled:
         abort(403, description="not enrolled")
 
+    # SR-12: The server determines overseas status from the voter's enrolment record,
+    # or from explicit request parameters/headers.
+    is_overseas = bool(getattr(voter, "overseas", False)) or (
+        request.headers.get("X-Overseas-Voting") == "true" or request.args.get("overseas") == "true"
+    )
+    if is_overseas:
+        ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+        client_ip = DiplomaticIPValidator.extract_client_ip(request)
+        if not DiplomaticIPValidator.is_ip_allowed(client_ip, ranges):
+            abort(403, description="access restricted to authorized diplomatic mission networks")
+
     # Atomic claim: only succeeds if no ballot was issued yet (base for SR-09)
     claimed = db.session.execute(
         update(Voter)
@@ -63,12 +75,26 @@ def issue_token():
         abort(409, description="ballot already issued")
 
     token = secrets.token_urlsafe(32)
-    db.session.add(BallotToken(token_hash=_hash_token(token), division=voter.division))
+    db.session.add(BallotToken(
+        token_hash=_hash_token(token),
+        division=voter.division,
+        overseas=is_overseas,
+    ))
     db.session.commit()
     # Deliberately not audited: a timestamped "voter X got a token" entry could be
     # lined up with the order of ballots in the chain (SR-14). The voter's
     # ballot_issued flag is the record that a ballot was issued.
     return jsonify(ballot_token=token, division=voter.division)
+
+
+@bp.post("/overseas/token")
+@permission_required("ballot:vote")
+def issue_overseas_token():
+    ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+    client_ip = DiplomaticIPValidator.extract_client_ip(request)
+    if not DiplomaticIPValidator.is_ip_allowed(client_ip, ranges):
+        abort(403, description="access restricted to authorized diplomatic mission networks")
+    return issue_token()
 
 
 def append_ballot(ballot, division):
@@ -105,6 +131,21 @@ def cast():
         abort(400, description="missing ballot token")
 
     token_hash = _hash_token(token)
+    token_record = db.session.get(BallotToken, token_hash)
+    if token_record is None or token_record.used:
+        abort(403, description="invalid or used ballot token")
+
+    # SR-12: The server checks the token's overseas status. An overseas voter
+    # cannot skip diplomatic IP restrictions by simply omitting client headers.
+    is_overseas = bool(getattr(token_record, "overseas", False)) or (
+        request.headers.get("X-Overseas-Voting") == "true" or request.args.get("overseas") == "true"
+    )
+    if is_overseas:
+        ranges = current_app.config.get("DIPLOMATIC_MISSION_IP_RANGES", "")
+        client_ip = DiplomaticIPValidator.extract_client_ip(request)
+        if not DiplomaticIPValidator.is_ip_allowed(client_ip, ranges):
+            abort(403, description="access restricted to authorized diplomatic mission networks")
+
     # Burn the token in one conditional UPDATE. Reading it first and marking it
     # used later would let two simultaneous requests with the same token both
     # pass the check and store two ballots.
@@ -116,7 +157,7 @@ def cast():
     if burned != 1:
         db.session.rollback()
         abort(403, description="invalid or used ballot token")
-    division = db.session.get(BallotToken, token_hash).division
+    division = token_record.division
 
     try:
         ballot = validate_ballot(data.get("ballot"), division)
@@ -126,5 +167,24 @@ def cast():
 
     digest = append_ballot(ballot, division)
     db.session.commit()
-    # The digest doubles as the voter's tracking code (hook for SR-10 receipt)
-    return jsonify(tracking_code=digest)
+    # SR-10: signed voter receipt with tracking code
+    keys = current_app.extensions["keys"]
+    receipt_sig = sign_receipt(keys.receipt_key(), digest)
+    return jsonify(tracking_code=digest, receipt=receipt_sig)
+
+
+@bp.post("/receipt/verify")
+@public
+def verify_receipt_endpoint():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        abort(400, description="missing or invalid request body")
+    tracking_code = data.get("tracking_code")
+    signature = data.get("receipt") if "receipt" in data else data.get("signature")
+    if not isinstance(tracking_code, str) or not isinstance(signature, str):
+        abort(400, description="missing or invalid tracking_code or signature")
+    if not tracking_code.strip() or not signature.strip():
+        abort(400, description="missing or invalid tracking_code or signature")
+    keys = current_app.extensions["keys"]
+    valid = verify_receipt(keys.receipt_key(), tracking_code, signature)
+    return jsonify(valid=valid, tracking_code=tracking_code)
