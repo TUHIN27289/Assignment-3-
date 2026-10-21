@@ -72,3 +72,19 @@ def ballot_digest(ballot_id, election_id, division, enc):
 
 def chain_mac(integrity_key, prev_mac, digest):
     return hmac.new(integrity_key, (prev_mac + digest).encode(), hashlib.sha256).hexdigest()
+
+
+def sign_receipt(receipt_key, tracking_code):
+    """SR-10: computes HMAC-SHA256 signature over the tracking code."""
+    if not isinstance(tracking_code, str):
+        raise TypeError("tracking_code must be a string")
+    return hmac.new(receipt_key, tracking_code.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_receipt(receipt_key, tracking_code, signature):
+    """SR-10: verifies the cryptographic receipt signature."""
+    if not isinstance(tracking_code, str) or not isinstance(signature, str):
+        return False
+    expected = hmac.new(receipt_key, tracking_code.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
