@@ -264,3 +264,65 @@ def test_registered_overseas_voter_cast_refused_without_headers(app, client):
     assert allowed.status_code == 200
     assert "tracking_code" in allowed.get_json()
     assert "receipt" in allowed.get_json()
+
+
+def test_enrolment_officer_registers_overseas_voter_and_ip_enforced(app, client):
+    """
+    SR-12 follow-up: Enrolment officer registers voter with overseas=True.
+    The registered voter cannot request a ballot token from outside diplomatic CIDRs (403),
+    even without sending any headers. Once connecting from an authorized diplomatic IP,
+    the token request succeeds.
+    """
+    from app.extensions import db
+    from app.models import User
+    from app.auth import hash_password
+
+    # Configure diplomatic mission IP CIDR
+    app.config["DIPLOMATIC_MISSION_IP_RANGES"] = "192.0.2.0/24"
+
+    # Add an enrolment officer
+    with app.app_context():
+        db.session.add(User(email="officer@test.local", password_hash=hash_password("pw-officer"), role="enrolment_officer"))
+        db.session.commit()
+
+    # Officer registers an overseas voter
+    officer_csrf = login(client, "officer@test.local", "pw-officer")
+    reg_res = client.post(
+        "/api/enrolment/voters",
+        headers={"X-CSRF-Token": officer_csrf},
+        json={
+            "email": "overseas_voter@test.local",
+            "full_name": "Overseas Citizen",
+            "date_of_birth": "1990-05-15",
+            "address": "Embassy Compound, Geneva",
+            "division": "Melbourne",
+            "overseas": True,
+        },
+    )
+    assert reg_res.status_code == 201
+    reg_data = reg_res.get_json()
+    assert reg_data["voter"]["overseas"] is True
+    temp_pw = reg_data["temporary_password"]
+
+    # Voter logs in
+    voter_client = app.test_client()
+    voter_csrf = login(voter_client, "overseas_voter@test.local", temp_pw)
+
+    # 1. Overseas voter tries to obtain token from outside diplomatic CIDR without headers -> 403
+    blocked = voter_client.post(
+        "/api/ballot/token",
+        headers={"X-CSRF-Token": voter_csrf},
+        environ_base={"REMOTE_ADDR": "198.51.100.50"},
+    )
+    assert blocked.status_code == 403
+    assert "restricted to authorized diplomatic mission" in blocked.get_json()["message"]
+
+    # 2. Overseas voter obtains token from inside diplomatic CIDR without headers -> 200
+    allowed = voter_client.post(
+        "/api/ballot/token",
+        headers={"X-CSRF-Token": voter_csrf},
+        environ_base={"REMOTE_ADDR": "192.0.2.88"},
+    )
+    assert allowed.status_code == 200
+    assert "ballot_token" in allowed.get_json()
+

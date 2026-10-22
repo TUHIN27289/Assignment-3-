@@ -50,7 +50,7 @@ def _dob(data):
 
 def _view(v, email=None):
     out = {"id": v.id, "full_name": v.full_name, "date_of_birth": v.date_of_birth, "address": v.address,
-           "division": v.division, "enrolled": v.enrolled}
+           "division": v.division, "enrolled": v.enrolled, "overseas": bool(getattr(v, "overseas", False))}
     if email:
         out["email"] = email
     return out
@@ -132,7 +132,8 @@ def register():
     db.session.add(user)
     db.session.flush()
     v = Voter(user_id=user.id, full_name=_text(data, "full_name", 2, 200), date_of_birth=d.isoformat(),
-              address=_text(data, "address", 5, 200), division=division, enrolled=True)
+              address=_text(data, "address", 5, 200), division=division, enrolled=True,
+              overseas=bool(data.get("overseas", False)))
     db.session.add(v)
     db.session.commit()
     audit.record("voter_registered", g.user.id, voter_id=v.id, division=division)
