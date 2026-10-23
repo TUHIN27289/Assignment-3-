@@ -1,5 +1,7 @@
 """SR-13: ballots are encrypted at submission and never stored in plaintext."""
 import json
+import os
+import stat
 
 import pytest
 from cryptography.exceptions import InvalidTag
@@ -67,7 +69,7 @@ def test_voting_path_never_loads_private_key(app, client, monkeypatch):
     assert vote(app, client, "voter1@test.local").status_code == 200
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no Unix file modes, it uses ACLs")
 def test_private_key_file_permissions(keys):
-    import os, stat
     mode = stat.S_IMODE(os.stat(os.path.join(keys.key_dir, "ballot_private.pem")).st_mode)
     assert mode == 0o600
